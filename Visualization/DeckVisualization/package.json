@@ -1,0 +1,28 @@
+{
+  "name": "react-mapbox-webpack-2",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "start-local": "webpack-dev-server --env.local --env.MyMapboxAccessToken --progress --hot --open --config webpack.config.js",
+    "start": "webpack-dev-server --progress --env.MyMapboxAccessToken --hot --open --config webpack.config.js",
+    "build": "webpack -p --config webpack.config.js"
+  },
+  "dependencies": {
+    "deck.gl": "^8.1.0",
+    "react": "^16.3.0",
+    "react-dom": "^16.3.0",
+    "react-map-gl": "^5.0.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.0.0",
+    "@babel/preset-react": "^7.0.0",
+    "babel-loader": "^8.0.0",
+    "css-loader": "^5.0.1",
+    "html-webpack-plugin": "^3.0.7",
+    "json-loader": "^0.5.7",
+    "style-loader": "^2.0.0",
+    "webpack": "^4.20.2",
+    "webpack-cli": "^3.1.2",
+    "webpack-dev-server": "^3.1.1"
+  }
+}
