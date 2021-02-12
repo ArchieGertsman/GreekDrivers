@@ -48,6 +48,5 @@ class Data:
         df = pd.concat(self.frames)
         return df
 
-    def pickle_df(self,pickle_name='sample.pkl')
-        self.df.to_pickle(pickle_name)
+  
 
