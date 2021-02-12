@@ -48,5 +48,12 @@ class Data:
         df = pd.concat(self.frames)
         return df
 
+    #saves first n id's in a pickle file
+    def pickle_df(self,n = 0,pickle_name="sample.pkl"):
+        if n == 0:
+            n = self.df.index.levels[0].size
+       
+        self.df.loc[:n].to_pickle(pickle_name)
+
   
 
