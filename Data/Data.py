@@ -47,3 +47,7 @@ class Data:
         "Concatenates all multi index tables to create onle large table."
         df = pd.concat(self.frames)
         return df
+
+    def pickle_df(self,pickle_name="sample.pkl")
+        self.df.to_pickle(pickle_name)
+
