@@ -8,15 +8,14 @@ class Data:
         self.D = 6 #data length
         self.idx_names = ['id', 'time']
         self.col_names = ['lat', 'lon', 'speed', 'lon_acc', 'lat_acc']
-        self.process_csv()
+        self.process_csv(csv_file)
         self.frames = [self.process(self.rows[i]) for i in range(len(self.rows))]
         self.df = self.create_df()
 
-    def process_csv(self):
+    def process_csv(self,csv_file):
         "pre processing function to turn csv file into usable material for `process`"
-        in_fname = 'sample_larger.csv'
 
-        with open(in_fname, "r") as f:
+        with open(csv_file, "r") as f:
             temp = f.readlines()
     
         self.rows = temp[1:]
