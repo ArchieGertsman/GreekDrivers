@@ -4,6 +4,7 @@ import pandas as pd
 class Data:
     "Constructor Class for creating multiindex data now and creating training and testing data later for chosen Nerual Network architecture later."
     def __init__(self,csv_file):
+        self.csv_file = csv_file
         self.H = 4 #header length 
         self.D = 6 #data length
         self.idx_names = ['id', 'time']
@@ -14,7 +15,7 @@ class Data:
 
     def process_csv(self):
         "pre processing function to turn csv file into usable material for `process`"
-        in_fname = 'sample_larger.csv'
+        in_fname = self.csv_file
 
         with open(in_fname, "r") as f:
             temp = f.readlines()
