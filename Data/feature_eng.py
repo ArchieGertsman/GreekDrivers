@@ -5,15 +5,17 @@ r-sowers@illinois.eduhttps://publish.illinois.edu/r-sowers/
 Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. Licensed under the MIT license
 """
 
-from data import csv_to_df
 import numpy as np
 import pandas as pd
 from numpy import arctan2, sin, cos
 
 
 def bearing(df):
-    """calculates and adds bearing column to dataframe"""
-    df['bearing'] = None
+    """calculates and adds bearing column to dataframe
+    Example usage:
+        df = csv_to_df('sample.csv')
+        df = bearing(df)
+    """
     bearing_list = [__calc_bearings_for_id(df, id) for id in df.index.unique(level=0)]
     df['bearing'] = pd.concat(bearing_list)
     return df
