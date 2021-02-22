@@ -7,7 +7,8 @@ Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. Li
 
 import numpy as np
 import pandas as pd
-from numpy import arctan2, sin, cos
+from numpy import arctan2, sin, cos, sqrt, radians
+import osmnx as ox
 
 
 def bearing(df):
@@ -19,6 +20,24 @@ def bearing(df):
     bearing_list = [__calc_bearings_for_id(df, id) for id in df.index.unique(level=0)]
     df['bearing'] = pd.concat(bearing_list)
     return df
+
+
+def nearest_graph_data(df, graph):
+    """uses osmnx to find nearest node and edge data, calculates 
+    progress along nearest edge as a ratio, and adds these features
+    as columns to the dataframe
+    Example usage:
+        df = csv_to_df('sample.csv')
+        graph = ox.graph_from_address('address_here', network_type='drive') 
+        df = nearest_graph_data(df, graph)
+    """
+    df['nearest_node'],             \
+    df['nearest_edge_start_node'],  \
+    df['nearest_edge_end_node'],    \
+    df['edge_progress']             \
+        = zip(*df.apply(__construct_graph_data_cols(graph), axis=1))
+    return df
+
 
 
 
@@ -49,3 +68,39 @@ def __calc_bearings_for_id(df, id):
     df = __bearing(c1, c2)
     df.index = old_idx
     return df
+
+
+def __construct_graph_data_cols(graph):
+    def aux(row):
+        coord = (row['lat'],row['lon'])
+        nn = ox.get_nearest_node(graph, coord, method='euclidean')
+        start, end, _ = ox.get_nearest_edge(graph, coord)
+        edge_prog = __edge_progress(graph, start, end, coord)
+        return nn, start, end, edge_prog
+    return aux
+
+
+def __edge_progress(graph, edge_start_node, edge_end_node, v_coord):
+    start_coord = graph.nodes[edge_start_node]['y'], graph.nodes[edge_start_node]['x']
+    end_coord = graph.nodes[edge_end_node]['y'], graph.nodes[edge_end_node]['x']
+
+    a = __euc_dist(start_coord, end_coord)
+    b = __euc_dist(start_coord, v_coord)
+    return b/a
+
+
+def __euc_dist(coord0, coord1):
+    EARTH_RADIUS = 6373
+
+    lat0, lon0 = coord0
+    lat1, lon1 = coord1
+
+    lat0, lon0 = radians(lat0), radians(lon0)
+    lat1, lon1 = radians(lat1), radians(lon1)
+
+    dlat = lat1 - lat0
+    dlon = lon1 - lon0
+
+    a = sin(dlat/2)**2 + cos(lat0) * cos(lat1) * sin(dlon/2)**2
+    c = 2 * arctan2(sqrt(a), sqrt(1-a))
+    return EARTH_RADIUS*c
