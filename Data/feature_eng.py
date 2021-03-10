@@ -38,6 +38,19 @@ def nearest_graph_data(df, graph):
         = zip(*df.apply(__construct_graph_data_cols(graph), axis=1))
     return df
 
+
+def direction(df):
+    """adds column that determiens which direction the vehicle is moving along an edge.
+    1 if moving from node with smaller id to node with larger id, 0 otherwise
+    Example usage:
+        df = csv_to_df('sample.csv')
+        df = direction(df)
+    """
+    dir_list = [__calc_dirs_for_id(df, id) for id in df.index.unique(level=0)]
+    df['dir'] = pd.concat(dir_list)
+    return df
+
+
 def gdf_from_coords(dataset): #creating gdf from max and min longitudes and latitudes from ampneuma dataset, dataset is expected to be created using csv_to_df
     max_lon = np.max(df["lon"])
     max_lat = np.max(df["lat"])
@@ -62,18 +75,16 @@ def __bearing(c1, c2):
 
 def __calc_bearings_for_id(df, id):
     """returns a multi-indexed dataframe of bearings at each timestep for vehicle with specified ID"""
-    df_1 = df.loc[id]
-    df_1 = df_1.set_index(pd.Index(range(0,len(df_1.index))))
-    df_2 = df_1.set_index(df_1.index - 1)
-    df_2 = df_2.drop(-1)
+    df1 = df.loc[id]
+    df1 = df1.set_index(pd.Index(range(0,len(df1.index))))
+    df2 = df1.set_index(df1.index - 1)
+    df2 = df2.drop(-1)
 
-    old_idx = df.index[df.index.isin([id], level=0)]
-
-    c1 = (df_1['lat'], df_1['lon'])
-    c2 = (df_2['lat'], df_2['lon'])
-    df = __bearing(c1, c2)
-    df.index = old_idx
-    return df
+    c1 = (df1['lat'], df1['lon'])
+    c2 = (df2['lat'], df2['lon'])
+    df3 = __bearing(c1, c2)
+    df3.index = df.index[df.index.isin([id], level=0)]
+    return df3
 
 
 def __construct_graph_data_cols(graph):
@@ -81,6 +92,8 @@ def __construct_graph_data_cols(graph):
         coord = (row['lat'],row['lon'])
         nn = ox.get_nearest_node(graph, coord, method='euclidean')
         start, end, _ = ox.get_nearest_edge(graph, coord)
+        if start > end:
+            start, end = end, start
         edge_prog = __edge_progress(graph, start, end, coord)
         return nn, start, end, edge_prog
     return aux
@@ -110,3 +123,16 @@ def __euc_dist(coord0, coord1):
     a = sin(dlat/2)**2 + cos(lat0) * cos(lat1) * sin(dlon/2)**2
     c = 2 * arctan2(sqrt(a), sqrt(1-a))
     return EARTH_RADIUS*c
+
+
+def __calc_dirs_for_id(df, id):
+    df1 = df.loc[id]
+    df1 = df1.set_index(pd.Index(range(0,len(df1.index))))
+    df2 = df1.set_index(df1.index - 1)
+    df2 = df2.drop(-1)
+    df2.at[len(df1)-1] = None
+
+    df3 = (df1['edge_progress'] < df2['edge_progress']).astype(int)
+    df3.iloc[-1] = df3.iloc[-2]
+    df3.index = old_idx = df.index[df.index.isin([id], level=0)]
+    return df3
