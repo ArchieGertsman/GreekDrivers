@@ -41,7 +41,8 @@ def nearest_graph_data(df, graph):
 
 def direction(df):
     """adds column that determiens which direction the vehicle is moving along an edge.
-    1 if moving from node with smaller id to node with larger id, 0 otherwise
+    1 if moving from node with smaller id to node with larger id, 0 otherwise.
+    Note: `nearest_graph_data` must have been run on this df, otherwise this will fail!
     Example usage:
         df = csv_to_df('sample.csv')
         df = direction(df)
