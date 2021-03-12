@@ -17,8 +17,9 @@ def bearing(df):
         df = csv_to_df('sample.csv')
         df = bearing(df)
     """
-    bearing_list = [__calc_bearings_for_id(df, id) for id in df.index.unique(level=0)]
-    df['bearing'] = pd.concat(bearing_list)
+    df['bearing'] = \
+        df.groupby('id', as_index=False, group_keys=False) \
+        .apply(__calc_bearings)
     return df
 
 
@@ -47,8 +48,11 @@ def direction(df):
         df = csv_to_df('sample.csv')
         df = direction(df)
     """
-    dir_list = [__calc_dirs_for_id(df, id) for id in df.index.unique(level=0)]
-    df['dir'] = pd.concat(dir_list)
+    df['dir'] = \
+        df.groupby(
+            ['id', 'nearest_edge_start_node', 'nearest_edge_end_node'], 
+            as_index=False, group_keys=False) \
+        .apply(__calc_directions)
     return df
 
 
@@ -74,17 +78,14 @@ def __bearing(c1, c2):
     return arctan2(x,y)
 
 
-def __calc_bearings_for_id(df, id):
+def __calc_bearings(df):
     """returns a multi-indexed dataframe of bearings at each timestep for vehicle with specified ID"""
-    df1 = df.loc[id]
-    df1 = df1.set_index(pd.Index(range(0,len(df1.index))))
-    df2 = df1.set_index(df1.index - 1)
-    df2 = df2.drop(-1)
+    df1 = df
+    df2 = df.shift(-1)
 
     c1 = (df1['lat'], df1['lon'])
     c2 = (df2['lat'], df2['lon'])
     df3 = __bearing(c1, c2)
-    df3.index = df.index[df.index.isin([id], level=0)]
     return df3
 
 
@@ -126,14 +127,10 @@ def __euc_dist(coord0, coord1):
     return EARTH_RADIUS*c
 
 
-def __calc_dirs_for_id(df, id):
-    df1 = df.loc[id]
-    df1 = df1.set_index(pd.Index(range(0,len(df1.index))))
-    df2 = df1.set_index(df1.index - 1)
-    df2 = df2.drop(-1)
-    df2.at[len(df1)-1] = None
-
+def __calc_directions(df):
+    df1 = df
+    df2 = df.shift(-1)
     df3 = (df1['edge_progress'] < df2['edge_progress']).astype(int)
-    df3.iloc[-1] = df3.iloc[-2]
-    df3.index = old_idx = df.index[df.index.isin([id], level=0)]
+    if len(df3) > 1:
+        df3.iloc[-1] = df3.iloc[-2]
     return df3
