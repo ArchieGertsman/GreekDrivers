@@ -80,6 +80,19 @@ def _calc_vehicle_density(df):
     df2 = df.reset_index().groupby(['nearest_edge_start_node','nearest_edge_end_node','dir','edge_progress_intervals']).agg({'id':['nunique']})
     return df2
 
+
+def _calc_edge_average_speed(df):
+    """returns a dataframe of the average speed of each edge (nearest_edge_start_node and nearest_edge_end_node pairs) for both directions(0 or 1)
+        df = Data('sample.csv').df
+        graph = ox.graph_from_address('Athens, Municipality of Athens, Regional Unit of Central Athens, Attica, 10667, Greece',           network_type='drive')  
+        df = nearest_graph_data(df,graph)
+        df = direction(df)
+        edge_average_speed = _calc_edge_average_speed(df)
+     """
+    df['edge_progress_intervals'] = df.groupby(['nearest_edge_start_node'])['edge_progress'].transform(lambda x: x-x%0.1)
+    df2 = df.reset_index().groupby(['nearest_edge_start_node','nearest_edge_end_node','edge_progress_intervals','dir'])['speed'].mean()
+    return df2
+
 def __bearing(c1, c2):
     """credit to https://bit.ly/3amjz0Q for bearing formula"""
     lat1,lon1 = c1
