@@ -93,6 +93,7 @@ def _calc_edge_average_speed(df):
     df2 = df.reset_index().groupby(['nearest_edge_start_node','nearest_edge_end_node','edge_progress_intervals','dir'])['speed'].mean()
     return df2
 
+
 def __bearing(c1, c2):
     """credit to https://bit.ly/3amjz0Q for bearing formula"""
     lat1,lon1 = c1
