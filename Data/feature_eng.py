@@ -56,14 +56,9 @@ def direction(df):
     return df
 
 
-def gdf_from_coords(dataset): #creating gdf from max and min longitudes and latitudes from ampneuma dataset, dataset is expected to be created using csv_to_df
-    max_lon = np.max(df["lon"])
-    max_lat = np.max(df["lat"])
-    min_lon = np.min(df["lon"])
-    min_lat = np.min(df["lat"])
-    return ox.geometries_from_bbox(max_lat,min_lat,max_lon,min_lon,tags={'building':True, 'landuse':True,'highway':True})
-
-
+def vehicle_density(df):
+    df = _calc_vehicle_density(df)
+    return df
 
 # helper functions
 
