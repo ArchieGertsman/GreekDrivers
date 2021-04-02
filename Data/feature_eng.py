@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from numpy import arctan2, sin, cos, sqrt, radians
 import osmnx as ox
+from joblib import Parallel, delayed
 
 
 def bearing(df):
@@ -32,11 +33,7 @@ def nearest_graph_data(df, graph):
         graph = ox.graph_from_address('address_here', network_type='drive') 
         df = nearest_graph_data(df, graph)
     """
-    df['nearest_node'],             \
-    df['nearest_edge_start_node'],  \
-    df['nearest_edge_end_node'],    \
-    df['edge_progress']             \
-        = zip(*df.apply(__construct_graph_data_cols(graph), axis=1))
+    df = __apply_parallel(df, __construct_graph_data_cols(graph))
     return df
 
 
@@ -49,44 +46,71 @@ def direction(df):
         df = direction(df)
     """
     df['dir'] = \
-        df.groupby(
-            ['id', 'nearest_edge_start_node', 'nearest_edge_end_node'], 
+        df  \
+        .groupby(['id', 'nearest_edge_start_node', 'nearest_edge_end_node'], 
             as_index=False, group_keys=False) \
         .apply(__calc_directions)
     return df
 
 
 def vehicle_density(df):
-    df = _calc_vehicle_density(df)
-    return df
+    """returns a dataframe of the unique edges (nearest_edge_start_node and neares_edge_end_node pairs) 
+    per direction (0 or 1) for edge progress intervals (in the range(0.0:0.9), 0.0 represents edge progress 
+    between 0-10%, 0.1 represents edge progress between 10-20% and so on. 
+        df must have been processed by `direction` first. Example usage: 
+        df = csv_to_df(csv.file)
+        graph = ox.graph_from_address('address_here', network_type='drive')  
+        df = nearest_graph_data(df,graph)
+        df = direction(df)
+        vehicle_density(df)
+     """
+    df['edge_progress_intervals'] = df                          \
+        .groupby(['nearest_edge_start_node'])['edge_progress']  \
+        .transform(lambda x: x-x%0.1)
+
+    df2 = df                                \
+        .reset_index()                      \
+        .groupby([                          \
+            'nearest_edge_start_node',      \
+            'nearest_edge_end_node',        \
+            'dir',                          \
+            'edge_progress_intervals'])     \
+        .agg({'id':['nunique']})
+    return df2
+
+
+def edge_average_speed(df):
+    """returns a dataframe of the average speed of each edge (nearest_edge_start_node 
+    and nearest_edge_end_node pairs) for both directions(0 or 1)
+        df = Data('sample.csv').df
+        graph = ox.graph_from_address('address_here', network_type='drive')  
+        df = nearest_graph_data(df,graph)
+        df = direction(df)
+        edge_average_speed(df)
+     """
+    df['edge_progress_intervals'] = df                          \
+        .groupby(['nearest_edge_start_node'])['edge_progress']  \
+        .transform(lambda x: x-x%0.1)                           \
+
+    df2 = df                            \
+        .reset_index()                  \
+        .groupby([                      \
+            'nearest_edge_start_node',  \
+            'nearest_edge_end_node',    \
+            'edge_progress_intervals',  \
+            'dir'])['speed']            \
+        .mean()
+    return df2
+
 
 # helper functions
 
-def _calc_vehicle_density(df):
-    """returns a dataframe of the unique edges (nearest_edge_start_node and neares_edge_end_node pairs) per direction (0 or 1) for edge progress intervals (in the          range(0.0:0.9), 0.0 represents edge progress between 0-10%, 0.1 represents edge progress between 10-20% and so on. 
-        df must have been processed by `direction` first. Example usage: 
-        df = csv_to_df(csv.file)
-        graph = ox.graph_from_address('Athens, Municipality of Athens, Regional Unit of Central Athens, Attica, 10667, Greece', network_type='drive')  
-        df = nearest_graph_data(df,graph)
-        df = direction(df)
-        vehicle_densities = _calc_vehicle_density(df)
-     """
-    df['edge_progress_intervals'] = df.groupby(['nearest_edge_start_node'])['edge_progress'].transform(lambda x: x-x%0.1)
-    df2 = df.reset_index().groupby(['nearest_edge_start_node','nearest_edge_end_node','dir','edge_progress_intervals']).agg({'id':['nunique']})
-    return df2
-
-
-def _calc_edge_average_speed(df):
-    """returns a dataframe of the average speed of each edge (nearest_edge_start_node and nearest_edge_end_node pairs) for both directions(0 or 1)
-        df = Data('sample.csv').df
-        graph = ox.graph_from_address('Athens, Municipality of Athens, Regional Unit of Central Athens, Attica, 10667, Greece',           network_type='drive')  
-        df = nearest_graph_data(df,graph)
-        df = direction(df)
-        edge_average_speed = _calc_edge_average_speed(df)
-     """
-    df['edge_progress_intervals'] = df.groupby(['nearest_edge_start_node'])['edge_progress'].transform(lambda x: x-x%0.1)
-    df2 = df.reset_index().groupby(['nearest_edge_start_node','nearest_edge_end_node','edge_progress_intervals','dir'])['speed'].mean()
-    return df2
+def __apply_parallel(df, func, n=4):
+    idx_names = df.index.names
+    retLst = Parallel(n_jobs=n)(delayed(func)(row) for _,row in df.iterrows())
+    df = pd.concat(retLst, axis=1).T
+    df.index.names = idx_names
+    return df
 
 
 def __bearing(c1, c2):
@@ -114,12 +138,16 @@ def __calc_bearings(df):
 def __construct_graph_data_cols(graph):
     def aux(row):
         coord = (row['lat'],row['lon'])
-        nn = ox.get_nearest_node(graph, coord, method='euclidean')
+        nn = ox.get_nearest_node(graph, coord)
         start, end, _ = ox.get_nearest_edge(graph, coord)
         if start > end:
             start, end = end, start
         edge_prog = __edge_progress(graph, start, end, coord)
-        return nn, start, end, edge_prog
+        row['nearest_node'] = nn
+        row['nearest_edge_start_node'] = start
+        row['nearest_edge_end_node'] = end
+        row['edge_progress']  = edge_prog
+        return row
     return aux
 
 
