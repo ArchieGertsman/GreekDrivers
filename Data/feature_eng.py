@@ -64,6 +64,7 @@ def vehicle_density(df):
         df = direction(df)
         vehicle_density(df)
      """
+    _,df["time_stamp"] = list(zip(*df.index))
     df['edge_progress_intervals'] = df                          \
         .groupby(['nearest_edge_start_node'])['edge_progress']  \
         .transform(lambda x: x-x%0.1)
@@ -74,7 +75,7 @@ def vehicle_density(df):
             'nearest_edge_start_node',      \
             'nearest_edge_end_node',        \
             'dir',                          \
-            'edge_progress_intervals'])     \
+            'edge_progress_intervals','time_stamp'])     \
         .agg({'id':['nunique']})
     return df2
 
@@ -88,6 +89,7 @@ def edge_average_speed(df):
         df = direction(df)
         edge_average_speed(df)
      """
+    _,df["time_stamp"] = list(zip(*df.index))
     df['edge_progress_intervals'] = df                          \
         .groupby(['nearest_edge_start_node'])['edge_progress']  \
         .transform(lambda x: x-x%0.1)                           \
@@ -98,18 +100,22 @@ def edge_average_speed(df):
             'nearest_edge_start_node',  \
             'nearest_edge_end_node',    \
             'edge_progress_intervals',  \
-            'dir'])['speed']            \
+            'dir','time_stamp'])['speed']            \
         .mean()
+    
     return df2
 
 
 # helper functions
 
 def __apply_parallel(df, func, n=4):
+    df_struct = dict(df.dtypes)
     idx_names = df.index.names
     retLst = Parallel(n_jobs=n)(delayed(func)(row) for _,row in df.iterrows())
     df = pd.concat(retLst, axis=1).T
     df.index.names = idx_names
+    df = df.astype(df_struct)
+    
     return df
 
 
