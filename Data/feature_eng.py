@@ -10,6 +10,8 @@ import pandas as pd
 from numpy import arctan2, sin, cos, sqrt, radians
 import osmnx as ox
 from joblib import Parallel, delayed
+from pyproj import Geod
+import geopandas
 
 
 def bearing(df):
@@ -24,16 +26,33 @@ def bearing(df):
     return df
 
 
-def nearest_graph_data(df, graph):
+def nearest_graph_data(df, graph, mode='balltree'):
     """uses osmnx to find nearest node and edge data, calculates 
     progress along nearest edge as a ratio, and adds these features
-    as columns to the dataframe
+    as columns to the dataframe. `mode` argument controls which method
+    is used to compute nearest edges.
     Example usage:
         df = csv_to_df('sample.csv')
         graph = ox.graph_from_address('address_here', network_type='drive') 
         df = nearest_graph_data(df, graph)
     """
-    df = __apply_parallel(df, __construct_graph_data_cols(graph))
+    if mode == None:
+        df = __apply_parallel(df, __construct_graph_data_cols(graph))
+        return df
+    elif mode == 'balltree':
+        # df['nearest_node'] = ox.get_nearest_nodes(graph, df['lon'], df['lat'], method='balltree')
+        ret = ox.get_nearest_edges(graph, df['lon'], df['lat'], method='balltree')
+    elif mode == 'kdtree':
+        g_proj, df_proj = __proj(graph, df)
+        # df['nearest_node'] = ox.get_nearest_nodes(g_proj, df_proj['geometry'].x, df_proj['geometry'].y, method='kdtree')
+        ret = ox.get_nearest_edges(g_proj, df_proj['geometry'].x, df_proj['geometry'].y, method='kdtree', dist=100)
+        df = df.drop('geometry', axis=1)
+    else:
+        raise ValueError('`mode` must be one of None, \'balltree\', or \'kdtree\'')
+        return None
+
+    df[['nearest_edge_start_node', 'nearest_edge_end_node']] = np.sort(ret[:,:2])
+    df['edge_progress'] = df.apply(__edge_progress, axis=1, args=(graph,))
     return df
 
 
@@ -155,43 +174,30 @@ def __calc_bearings(df):
 def __construct_graph_data_cols(graph):
     def aux(row):
         coord = (row['lat'],row['lon'])
-        nn = ox.get_nearest_node(graph, coord)
+        # nn = ox.get_nearest_node(graph, coord)
         start, end, _ = ox.get_nearest_edge(graph, coord)
         if start > end:
             start, end = end, start
-        edge_prog = __edge_progress(graph, start, end, coord)
-        row['nearest_node'] = nn
+        # row['nearest_node'] = nn
         row['nearest_edge_start_node'] = start
         row['nearest_edge_end_node'] = end
-        row['edge_progress']  = edge_prog
+        row['edge_progress']  = __edge_progress(row, graph)
         return row
     return aux
 
 
-def __edge_progress(graph, edge_start_node, edge_end_node, v_coord):
-    start_coord = graph.nodes[edge_start_node]['y'], graph.nodes[edge_start_node]['x']
-    end_coord = graph.nodes[edge_end_node]['y'], graph.nodes[edge_end_node]['x']
+def __edge_progress(row, graph):
+    edge_start_node = row['nearest_edge_start_node']
+    edge_end_node = row['nearest_edge_end_node']
 
-    a = __euc_dist(start_coord, end_coord)
-    b = __euc_dist(start_coord, v_coord)
+    lon_start, lat_start = graph.nodes[edge_start_node]['x'], graph.nodes[edge_start_node]['y']
+    lon_end, lat_end = graph.nodes[edge_end_node]['x'], graph.nodes[edge_end_node]['y']
+    lon_v, lat_v = row[['lon', 'lat']]
+
+    geod = Geod(ellps='WGS84')
+    _,_,a = geod.inv(lon_start, lat_start, lon_end, lat_end)
+    _,_,b = geod.inv(lon_start, lat_start, lon_v, lat_v)
     return b/a
-
-
-def __euc_dist(coord0, coord1):
-    EARTH_RADIUS = 6373
-
-    lat0, lon0 = coord0
-    lat1, lon1 = coord1
-
-    lat0, lon0 = radians(lat0), radians(lon0)
-    lat1, lon1 = radians(lat1), radians(lon1)
-
-    dlat = lat1 - lat0
-    dlon = lon1 - lon0
-
-    a = sin(dlat/2)**2 + cos(lat0) * cos(lat1) * sin(dlon/2)**2
-    c = 2 * arctan2(sqrt(a), sqrt(1-a))
-    return EARTH_RADIUS*c
 
 
 def __calc_directions(df):
@@ -220,3 +226,13 @@ def __split_vehicle(df, size):
     df2 = __truncate_trajectory(df2, size)
     df2 = df2.reorder_levels([0,2,1])
     return df2
+
+
+def __proj(g, df):
+    WORLD_EPSG = 4326
+    df_proj = geopandas.GeoDataFrame(
+        df, geometry=geopandas.points_from_xy(df['lon'], df['lat']))
+    df_proj.crs = WORLD_EPSG
+    df_proj = ox.project_gdf(df_proj)
+    g_proj = ox.project_graph(g)
+    return g_proj, df_proj
