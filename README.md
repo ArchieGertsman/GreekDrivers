@@ -7,10 +7,17 @@ Project director: Richard Sowers
 * <r-sowers@illinois.edu>
 * <https://publish.illinois.edu/r-sowers/>
 
-Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. Licensed under the MIT license
+Copyright 2021 University of Illinois Board of Trustees. All Rights Reserved. Licensed under the MIT license
 
 ### Explanation of repository:
-what is the point of the repository
+The recently-release pNeuma Dataset (at https://open-traffic.epfl.ch/) contains GPS traces of Athens traffic, annotated with vehicle type.  We would like to see if we could algorithmically distinguish between car and taxi drivers by "driving styles"
+
+###Relevant Publications###
+* https://doi.org/10.1016/j.trc.2017.11.021
+* https://doi.org/10.1016/j.trc.2020.102644
+* https://doi.org/10.1016/j.trc.2018.03.024
+* https://doi.org/10.1016/j.trc.2013.09.015
+
 
 ### File structure:  help the user out
 * file structure
