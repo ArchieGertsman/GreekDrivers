@@ -106,6 +106,17 @@ def edge_average_speed(df):
     return df2
 
 
+def split_trajectories(df, size):
+    """splits each vehicle's trajectory into smaller trajectories of fixed size,
+    adding another dimension to the multiindex. Data is truncated to be a multiple
+    of `size` in length. Example usage:
+    df = csv_to_df('sample.csv')
+    df = split_trajectories(df, 10)
+    """
+    return df.groupby('id', as_index=False, group_keys=False) \
+            .apply(__split_vehicle, size)
+
+
 # helper functions
 
 def __apply_parallel(df, func, n=4):
@@ -190,3 +201,22 @@ def __calc_directions(df):
     if len(df3) > 1:
         df3.iloc[-1] = df3.iloc[-2]
     return df3
+
+
+def __truncate_to_multiple(n, m):
+    return m * (n // m)
+
+def __truncate_trajectory(traj, size):
+    n = len(traj)
+    new_len = __truncate_to_multiple(n, size)
+    return traj[:new_len]
+
+def __split_vehicle(df, size):
+    df2 = df.copy()
+    df2['traj'] = None
+    df2.loc[::size, 'traj'] = np.arange(len(df2[::size]), dtype=int)
+    df2['traj'].ffill(inplace=True)
+    df2.set_index('traj', append=True, inplace=True)
+    df2 = __truncate_trajectory(df2, size)
+    df2 = df2.reorder_levels([0,2,1])
+    return df2
