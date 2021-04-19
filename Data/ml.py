@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np 
-import tensorflow as tf
 import keras
 from collections import defaultdict
 from sklearn.model_selection import train_test_split
@@ -18,16 +17,22 @@ class Data:
         self.PartitionData()
         self.encoder = LabelEncoder()
         self.encoder.fit(self.y_data)
-        y_train = self.encoder.transform(self.y_train)
-        y_test = self.encoder.transform(self.y_test)
+        self.y_train = np.expand_dims(self.encoder.transform(self.y_train),-1)
+        self.y_test = np.expand_dims(self.encoder.transform(self.y_test),-1)
+
         
     def CreateVectors(self):
         for idx in self.unique_ids:
             for vector in self.vectors:
-                self.data_dict[idx].append(self.df[self.df["id"]==idx][vector])
+                self.data_dict[idx].\
+                    append(self.df[self.df["id"]==idx][vector].\
+                        tolist())
         
     def PartitionData(self):
-        self.x_data = np.array([self.data_dict[idx] for idx in self.unique_ids])
+        self.x_data = np.array([[[self.data_dict[idx][i][j]\
+            for i in range(len(self.vectors))]\
+                for j in range(1500)]\
+                    for idx in self.unique_ids])
         self.y_data = np.array([self.df[self.df["id"]==idx]["type"].iloc[0] \
                         for idx in self.unique_ids])
         self.x_train,self.x_test,self.y_train,self.y_test = train_test_split(\
@@ -40,6 +45,8 @@ class Network:
         self.neurons_dense = neurons_dense
         self.epochs=epochs
         self.Data = Data
+        self.Baseline()
+        self.FitModel()
 
     def Baseline(self):
         self.model = keras.models.Sequential([
@@ -52,5 +59,5 @@ class Network:
                       metrics=['accuracy'])
 
     def FitModel(self):
-        self.model.fit(self.Data.x_train.self.Data.y_train, \
+        self.model.fit(self.Data.x_train,self.Data.y_train, \
             validation_data=(self.Data.x_test,self.Data.y_test), epochs=self.epochs)
