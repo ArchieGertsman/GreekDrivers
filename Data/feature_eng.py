@@ -9,6 +9,9 @@ import numpy as np
 import pandas as pd
 from numpy import arctan2, sin, cos, sqrt, radians
 import osmnx as ox
+from joblib import Parallel, delayed
+from pyproj import Geod
+import geopandas
 
 
 def bearing(df):
@@ -17,50 +20,134 @@ def bearing(df):
         df = csv_to_df('sample.csv')
         df = bearing(df)
     """
-    bearing_list = [__calc_bearings_for_id(df, id) for id in df.index.unique(level=0)]
-    df['bearing'] = pd.concat(bearing_list)
+    df['bearing'] = \
+        df.groupby('id', as_index=False, group_keys=False) \
+        .apply(__calc_bearings)
     return df
 
 
-def nearest_graph_data(df, graph):
+def nearest_graph_data(df, graph, mode='balltree'):
     """uses osmnx to find nearest node and edge data, calculates 
     progress along nearest edge as a ratio, and adds these features
-    as columns to the dataframe
+    as columns to the dataframe. `mode` argument controls which method
+    is used to compute nearest edges.
     Example usage:
         df = csv_to_df('sample.csv')
         graph = ox.graph_from_address('address_here', network_type='drive') 
         df = nearest_graph_data(df, graph)
     """
-    df['nearest_node'],             \
-    df['nearest_edge_start_node'],  \
-    df['nearest_edge_end_node'],    \
-    df['edge_progress']             \
-        = zip(*df.apply(__construct_graph_data_cols(graph), axis=1))
+    if mode == None:
+        df = __apply_parallel(df, __construct_graph_data_cols(graph))
+        return df
+    elif mode == 'balltree':
+        # df['nearest_node'] = ox.get_nearest_nodes(graph, df['lon'], df['lat'], method='balltree')
+        ret = ox.get_nearest_edges(graph, df['lon'], df['lat'], method='balltree')
+    elif mode == 'kdtree':
+        g_proj, df_proj = __proj(graph, df)
+        # df['nearest_node'] = ox.get_nearest_nodes(g_proj, df_proj['geometry'].x, df_proj['geometry'].y, method='kdtree')
+        ret = ox.get_nearest_edges(g_proj, df_proj['geometry'].x, df_proj['geometry'].y, method='kdtree', dist=100)
+        df = df.drop('geometry', axis=1)
+    else:
+        raise ValueError('`mode` must be one of None, \'balltree\', or \'kdtree\'')
+        return None
+
+    df[['nearest_edge_start_node', 'nearest_edge_end_node']] = np.sort(ret[:,:2])
+    df['edge_progress'] = df.apply(__edge_progress, axis=1, args=(graph,))
     return df
 
 
 def direction(df):
     """adds column that determiens which direction the vehicle is moving along an edge.
-    1 if moving from node with smaller id to node with larger id, 0 otherwise
+    1 if moving from node with smaller id to node with larger id, 0 otherwise.
+    Note: `nearest_graph_data` must have been run on this df, otherwise this will fail!
     Example usage:
         df = csv_to_df('sample.csv')
         df = direction(df)
     """
-    dir_list = [__calc_dirs_for_id(df, id) for id in df.index.unique(level=0)]
-    df['dir'] = pd.concat(dir_list)
+    df['dir'] = \
+        df  \
+        .groupby(['id', 'nearest_edge_start_node', 'nearest_edge_end_node'], 
+            as_index=False, group_keys=False) \
+        .apply(__calc_directions)
     return df
 
 
-def gdf_from_coords(dataset): #creating gdf from max and min longitudes and latitudes from ampneuma dataset, dataset is expected to be created using csv_to_df
-    max_lon = np.max(df["lon"])
-    max_lat = np.max(df["lat"])
-    min_lon = np.min(df["lon"])
-    min_lat = np.min(df["lat"])
-    return ox.geometries_from_bbox(max_lat,min_lat,max_lon,min_lon,tags={'building':True, 'landuse':True,'highway':True})
+def vehicle_density(df):
+    """returns a dataframe of the unique edges (nearest_edge_start_node and neares_edge_end_node pairs) 
+    per direction (0 or 1) for edge progress intervals (in the range(0.0:0.9), 0.0 represents edge progress 
+    between 0-10%, 0.1 represents edge progress between 10-20% and so on. 
+        df must have been processed by `direction` first. Example usage: 
+        df = csv_to_df(csv.file)
+        graph = ox.graph_from_address('address_here', network_type='drive')  
+        df = nearest_graph_data(df,graph)
+        df = direction(df)
+        vehicle_density(df)
+     """
+    _,df["time_stamp"] = list(zip(*df.index))
+    df['edge_progress_intervals'] = df                          \
+        .groupby(['nearest_edge_start_node'])['edge_progress']  \
+        .transform(lambda x: x-x%0.1)
 
+    df2 = df                                \
+        .reset_index()                      \
+        .groupby([                          \
+            'nearest_edge_start_node',      \
+            'nearest_edge_end_node',        \
+            'dir',                          \
+            'edge_progress_intervals','time_stamp'])     \
+        .agg({'id':['nunique']})
+    return df2
+
+
+def edge_average_speed(df):
+    """returns a dataframe of the average speed of each edge (nearest_edge_start_node 
+    and nearest_edge_end_node pairs) for both directions(0 or 1)
+        df = Data('sample.csv').df
+        graph = ox.graph_from_address('address_here', network_type='drive')  
+        df = nearest_graph_data(df,graph)
+        df = direction(df)
+        edge_average_speed(df)
+     """
+    _,df["time_stamp"] = list(zip(*df.index))
+    df['edge_progress_intervals'] = df                          \
+        .groupby(['nearest_edge_start_node'])['edge_progress']  \
+        .transform(lambda x: x-x%0.1)                           \
+
+    df2 = df                            \
+        .reset_index()                  \
+        .groupby([                      \
+            'nearest_edge_start_node',  \
+            'nearest_edge_end_node',    \
+            'edge_progress_intervals',  \
+            'dir','time_stamp'])['speed']            \
+        .mean()
+    
+    return df2
+
+
+def split_trajectories(df, size):
+    """splits each vehicle's trajectory into smaller trajectories of fixed size,
+    adding another dimension to the multiindex. Data is truncated to be a multiple
+    of `size` in length. Example usage:
+    df = csv_to_df('sample.csv')
+    df = split_trajectories(df, 10)
+    """
+    return df.groupby('id', as_index=False, group_keys=False) \
+            .apply(__split_vehicle, size)
 
 
 # helper functions
+
+def __apply_parallel(df, func, n=4):
+    df_struct = dict(df.dtypes)
+    idx_names = df.index.names
+    retLst = Parallel(n_jobs=n)(delayed(func)(row) for _,row in df.iterrows())
+    df = pd.concat(retLst, axis=1).T
+    df.index.names = idx_names
+    df = df.astype(df_struct)
+    
+    return df
+
 
 def __bearing(c1, c2):
     """credit to https://bit.ly/3amjz0Q for bearing formula"""
@@ -73,66 +160,79 @@ def __bearing(c1, c2):
     return arctan2(x,y)
 
 
-def __calc_bearings_for_id(df, id):
+def __calc_bearings(df):
     """returns a multi-indexed dataframe of bearings at each timestep for vehicle with specified ID"""
-    df1 = df.loc[id]
-    df1 = df1.set_index(pd.Index(range(0,len(df1.index))))
-    df2 = df1.set_index(df1.index - 1)
-    df2 = df2.drop(-1)
+    df1 = df
+    df2 = df.shift(-1)
 
     c1 = (df1['lat'], df1['lon'])
     c2 = (df2['lat'], df2['lon'])
     df3 = __bearing(c1, c2)
-    df3.index = df.index[df.index.isin([id], level=0)]
     return df3
 
 
 def __construct_graph_data_cols(graph):
     def aux(row):
         coord = (row['lat'],row['lon'])
-        nn = ox.get_nearest_node(graph, coord, method='euclidean')
+        # nn = ox.get_nearest_node(graph, coord)
         start, end, _ = ox.get_nearest_edge(graph, coord)
         if start > end:
             start, end = end, start
-        edge_prog = __edge_progress(graph, start, end, coord)
-        return nn, start, end, edge_prog
+        # row['nearest_node'] = nn
+        row['nearest_edge_start_node'] = start
+        row['nearest_edge_end_node'] = end
+        row['edge_progress']  = __edge_progress(row, graph)
+        return row
     return aux
 
 
-def __edge_progress(graph, edge_start_node, edge_end_node, v_coord):
-    start_coord = graph.nodes[edge_start_node]['y'], graph.nodes[edge_start_node]['x']
-    end_coord = graph.nodes[edge_end_node]['y'], graph.nodes[edge_end_node]['x']
+def __edge_progress(row, graph):
+    edge_start_node = row['nearest_edge_start_node']
+    edge_end_node = row['nearest_edge_end_node']
 
-    a = __euc_dist(start_coord, end_coord)
-    b = __euc_dist(start_coord, v_coord)
+    lon_start, lat_start = graph.nodes[edge_start_node]['x'], graph.nodes[edge_start_node]['y']
+    lon_end, lat_end = graph.nodes[edge_end_node]['x'], graph.nodes[edge_end_node]['y']
+    lon_v, lat_v = row[['lon', 'lat']]
+
+    geod = Geod(ellps='WGS84')
+    _,_,a = geod.inv(lon_start, lat_start, lon_end, lat_end)
+    _,_,b = geod.inv(lon_start, lat_start, lon_v, lat_v)
     return b/a
 
 
-def __euc_dist(coord0, coord1):
-    EARTH_RADIUS = 6373
-
-    lat0, lon0 = coord0
-    lat1, lon1 = coord1
-
-    lat0, lon0 = radians(lat0), radians(lon0)
-    lat1, lon1 = radians(lat1), radians(lon1)
-
-    dlat = lat1 - lat0
-    dlon = lon1 - lon0
-
-    a = sin(dlat/2)**2 + cos(lat0) * cos(lat1) * sin(dlon/2)**2
-    c = 2 * arctan2(sqrt(a), sqrt(1-a))
-    return EARTH_RADIUS*c
-
-
-def __calc_dirs_for_id(df, id):
-    df1 = df.loc[id]
-    df1 = df1.set_index(pd.Index(range(0,len(df1.index))))
-    df2 = df1.set_index(df1.index - 1)
-    df2 = df2.drop(-1)
-    df2.at[len(df1)-1] = None
-
+def __calc_directions(df):
+    df1 = df
+    df2 = df.shift(-1)
     df3 = (df1['edge_progress'] < df2['edge_progress']).astype(int)
-    df3.iloc[-1] = df3.iloc[-2]
-    df3.index = old_idx = df.index[df.index.isin([id], level=0)]
+    if len(df3) > 1:
+        df3.iloc[-1] = df3.iloc[-2]
     return df3
+
+
+def __truncate_to_multiple(n, m):
+    return m * (n // m)
+
+def __truncate_trajectory(traj, size):
+    n = len(traj)
+    new_len = __truncate_to_multiple(n, size)
+    return traj[:new_len]
+
+def __split_vehicle(df, size):
+    df2 = df.copy()
+    df2['traj'] = None
+    df2.loc[::size, 'traj'] = np.arange(len(df2[::size]), dtype=int)
+    df2['traj'].ffill(inplace=True)
+    df2.set_index('traj', append=True, inplace=True)
+    df2 = __truncate_trajectory(df2, size)
+    df2 = df2.reorder_levels([0,2,1])
+    return df2
+
+
+def __proj(g, df):
+    WORLD_EPSG = 4326
+    df_proj = geopandas.GeoDataFrame(
+        df, geometry=geopandas.points_from_xy(df['lon'], df['lat']))
+    df_proj.crs = WORLD_EPSG
+    df_proj = ox.project_gdf(df_proj)
+    g_proj = ox.project_graph(g)
+    return g_proj, df_proj
