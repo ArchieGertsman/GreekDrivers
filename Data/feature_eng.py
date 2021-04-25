@@ -12,7 +12,11 @@ import osmnx as ox
 from joblib import Parallel, delayed
 from pyproj import Geod
 import geopandas
+import nvector as nv
 
+import matplotlib.pyplot as plt
+import networkx as nx
+from nvector import rad
 
 def bearing(df):
     """calculates and adds bearing column to dataframe
@@ -136,7 +140,55 @@ def split_trajectories(df, size):
             .apply(__split_vehicle, size)
 
 
+def cross_track(df,graph):
+    
+    return df.groupby(['nearest_edge_start_node', 'nearest_edge_end_node'], as_index=False, group_keys=False) \
+        .apply(__calc_xtrack_dists, graph)
+    
+def edge_encoding(df):
+    df_edge_list = df.reset_index()[['id','edge_id']].drop_duplicates()
+    df_edge_list.set_index(['id','edge_id'],inplace = True)
+    df_edge_list['edge_id'] = df_edge_list.index.get_level_values('edge_id') 
+    df_edge_dummies = pd.get_dummies(df_edge_list)
+    return df.join(df_edge_dummies)
+
+
 # helper functions
+
+def __calc_xtrack_dists(group, graph):
+    start_node, end_node = group[['nearest_edge_start_node', 'nearest_edge_end_node']].iloc[0]
+    lon_start, lat_start = graph.nodes[start_node]['x'],graph.nodes[start_node]['y']
+    lon_end, lat_end = graph.nodes[end_node]['x'],graph.nodes[end_node]['y']
+    lon_v, lat_v = group['lon'], group['lat']
+
+    start_pt = nv.lat_lon2n_E(rad(lat_start), rad(lon_start))
+    end_pt = nv.lat_lon2n_E(rad(lat_end), rad(lon_end))
+    v_pt = nv.lat_lon2n_E(rad(lat_v), rad(lon_v))
+
+    group['xtrack_dist'] = nv.cross_track_distance((start_pt,end_pt), v_pt)
+    return group
+
+def __cross_track_func(graph, start_node, end_node, lat, lon):
+     return __cross_track_dist(graph.nodes[start_node]['y'],graph.nodes[start_node]['x'],
+                                        graph.nodes[end_node]['y'],graph.nodes[end_node]['x'],lat,lon)
+
+def __cross_track_dist(latA1,lonA1,latA2,lonA2,latB,lonB):
+    frame = nv.FrameE(a=6371e3, f=0)
+    
+    pointA1 = frame.GeoPoint(latA1, lonA1, degrees=True)
+    pointA2 = frame.GeoPoint(latA2, lonA2, degrees=True)
+    pointB = frame.GeoPoint(latB, lonB, degrees=True)
+    pathA = nv.GeoPath(pointA1, pointA2)
+
+    s_xt = pathA.cross_track_distance(pointB, method='greatcircle')
+    d_xt = pathA.cross_track_distance(pointB, method='euclidean')
+    
+    if(s_xt<0):
+        s_xt=-1*s_xt
+    
+    val_txt = '{:4.2f}'.format(s_xt/1000)
+    return val_txt
+
 
 def __apply_parallel(df, func, n=4):
     df_struct = dict(df.dtypes)
