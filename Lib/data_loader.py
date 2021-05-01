@@ -19,14 +19,6 @@ def csv_to_df(csv_fname):
     return pd.concat(dfs)
 
 
-def pickle_df(df, n=0, pickle_name='sample.pkl'):
-    """saves first n id's in a pickle file"""
-    if n == 0:
-        n = df.index.levels[0].size
-    
-    df.loc[:n].to_pickle(pickle_name)
-
-
 # helper functions
 
 def __read_row_strs(csv_fname):
