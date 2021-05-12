@@ -47,3 +47,4 @@ The recently-release pNeuma Dataset (at https://open-traffic.epfl.ch/) contains 
 
 ## Results
 * classical methods are able to distinguish between cars and taxis with over 70% accuracy (see Analysis/ML/classical_models.ipynb for visualization)
+* methods using lstm's are able to distinguish cars and waxis with $\sim 61\%$ accuracy.
