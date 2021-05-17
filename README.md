@@ -7,7 +7,7 @@ Undergraduates:
 * Ridha Alkhabaz (ridhama2@illinois.edu)
 * Sheil Kumar (sk17@illinois.edu)
 
-Graduate lead: Lloyd Fernandes (lloydf2@illinois.edu)
+Graduate lead: Lloyd Fernandes (lloydf2@illinois.edu, https://www.linkedin.com/in/fernandeslloyd/)
 
 Project director: Richard Sowers
 * <r-sowers@illinois.edu>
