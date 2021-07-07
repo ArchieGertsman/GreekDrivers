@@ -137,7 +137,7 @@ def split_trajectories(df, size):
         df = csv_to_df('sample.csv')
         df = split_trajectories(df, 3000)
     """
-    return df.groupby('id', as_index=False, group_keys=False) \
+    return df.groupby(df.index.names[:-1], as_index=False, group_keys=False) \
             .apply(__split_vehicle, size)
 
 
@@ -255,7 +255,11 @@ def __split_vehicle(df, size):
     df2['traj'].ffill(inplace=True)
     df2.set_index('traj', append=True, inplace=True)
     df2 = __truncate_trajectory(df2, size)
-    df2 = df2.reorder_levels([0,2,1])
+
+    # swap order of last two levels of index
+    order = np.arange(df.index.nlevels+1)
+    order[-2:] = order[:2:-1]
+    df2 = df2.reorder_levels(order)
     return df2
 
 
