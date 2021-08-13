@@ -4,3 +4,12 @@
 *__pycache__
 *.vscode
 *cache
+
+visualization/
+analyis/
+ml/OldFiles/
+data/
+
+data_preprocessing.ipynb
+concat_dataframes.ipynb
+sample.ipynb
