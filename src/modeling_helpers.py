@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
+from joblib import Parallel, delayed
+import multiprocessing
 
 
 def downsample(df, window, overlap, agg_dict):
@@ -40,8 +42,11 @@ def downsample(df, window, overlap, agg_dict):
     step = int((1-overlap)*window)
     df_drop_type = df.drop('type', axis=1)
     
-    df_agg = df_drop_type.groupby(['id','road']) \
-        .apply(__downsample_group, window, step)
+#     df_agg = df_drop_type.groupby(['id','road']) \
+#         .apply(__downsample_group, window, step)
+
+    df_agg = __groupby_apply_parallel(
+        df_drop_type, ['id','road'], __downsample_group, window, step)
     df_agg.columns = __downsample_cols(df_drop_type.columns)
     df_agg = df_agg[__extract_feature_list(agg_dict)]
     df_agg = __append_type_column(df_agg, df)
@@ -54,7 +59,7 @@ def train_test_split_vehicles(df_agg, test_class_size):
     df_agg_test = __sample_test_set(df_agg, test_class_size)
     df_agg_train = __construct_train_set(
         df_agg, df_agg_test.index.get_level_values('id'))
-    return df_agg_train, df_agg_test
+    return __split_X_y(df_agg_train), __split_X_y(df_agg_test)
 
 
 def accuracy(model, X, y, metric=accuracy_score):
@@ -72,11 +77,6 @@ def accuracy(model, X, y, metric=accuracy_score):
     return metric(y, y_hat)
 
 
-def split_X_y(df_agg):
-    """splits labelled data into unlabelled data and labels"""
-    return df_agg.drop('type', axis=1), df_agg.type
-
-
 
     
 
@@ -89,6 +89,20 @@ def split_X_y(df_agg):
 
 
 """ downsample """
+
+def __temp_func(func, name, grp, *args):     
+    return func(grp, *args), name
+
+
+def __groupby_apply_parallel(df, by, func, *args):
+    g = df.groupby(by)
+    idx_names = df.index.names
+    lst,idx = zip(*Parallel(n_jobs=multiprocessing.cpu_count())
+        (delayed(__temp_func)(func, name, grp, *args) for name,grp in g))
+    df2 = pd.concat(lst, keys=idx)
+    df2.index.names = idx_names + ['level_2']
+    return df2
+
 
 def __downsample_group(grp, window, step):
     """downsamples an individual (id,road) pair"""
@@ -197,6 +211,11 @@ def __resample_idx(road, vehicle_class, n_resample):
         .sample(n_resample, replace=True) \
         .values
     return idx_resample
+
+
+def __split_X_y(df_agg):
+    """splits labelled data into unlabelled data and labels"""
+    return df_agg.drop('type', axis=1), df_agg.type
 
 
 
