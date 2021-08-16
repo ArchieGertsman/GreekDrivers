@@ -52,7 +52,8 @@ def train_test_split_vehicles(df_agg, test_class_size):
     """splits the data into a train and test set, where the test set
     has `test_class_size` vehicles from each class"""
     df_agg_test = __sample_test_set(df_agg, test_class_size)
-    df_agg_train = __construct_train_set(df_agg, df_agg_test.index)
+    df_agg_train = __construct_train_set(
+        df_agg, df_agg_test.index.get_level_values('id'))
     return df_agg_train, df_agg_test
 
 
@@ -164,13 +165,14 @@ def __sample_class_idx(df, vehicle_class, class_size):
 
 # train set
 
-def __construct_train_set(df_agg, test_idx):
+def __construct_train_set(df_agg, test_ids):
     """balances the number of vehicles on each road by resampling the
     smaller class. Only selects vehicles that were not chosen to be
     in the test set
     """
-    df_agg_train = df_agg.drop(test_idx)
-    df_agg_train = df_agg_train.groupby(['road']).apply(__balance_road)
+    df_agg_train = df_agg.drop(index=test_ids, level='id')
+    df_agg_train = df_agg_train.groupby('road').apply(__balance_road)
+    df_agg_train.index = df_agg_train.index.reorder_levels((1,0))
     return df_agg_train
 
 
