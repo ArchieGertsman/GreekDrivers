@@ -74,6 +74,12 @@ def accuracy(model, X, y, metric=accuracy_score):
     y_hat_p = y_hat_p.groupby('id').agg('mean')
     y_hat = __vote(y_hat_p, model.classes_)
 
+#     y_hat_p = model.predict(X)
+#     y_hat_p = pd.DataFrame(index=X.index, data=y_hat_p, columns=['type'])
+#     y_hat_p = y_hat_p.groupby(['id','road']).agg(lambda x: x.mode()[0])
+#     y_hat_p = y_hat_p.groupby('id').agg(lambda x: x.mode()[0])
+#     y_hat = y_hat_p
+
     return metric(y, y_hat)
 
 
@@ -222,6 +228,9 @@ def __split_X_y(df_agg):
 
 
 """ accuracy """
+
+def __extreme(x):
+    return x[np.abs((x-0.5)).argmax()]
 
 def __vote(y_hat_p, classes):
     return y_hat_p.type.map(lambda x: classes[0] if x>=0.5 else classes[1])
