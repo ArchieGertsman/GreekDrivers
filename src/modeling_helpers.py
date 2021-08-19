@@ -43,13 +43,14 @@ def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=Non
     """
     assert(__extract_agg_funcs(agg_dict) == set({'mean','std'}))
     
+    df_cpy = df.copy()
+    
     if min_speed_ratio is not None:
-#         df['speed_bool'] = (df.speed>0).astype(int)
-        df.insert(len(df.columns), 'speed_bool', (df.speed>0).astype(int))
+        df_cpy['speed_bool'] = (df_cpy.speed>0).astype(int)
         agg_dict['speed_bool'] = ['mean']
     
     step = int((1-overlap)*window)
-    df_drop_type = df.drop('type', axis=1)
+    df_drop_type = df_cpy.drop('type', axis=1)
     
     if parallel:
         df_agg = __groupby_apply_parallel(df_drop_type, ['id','road'], 
@@ -69,7 +70,7 @@ def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=Non
     return df_agg
 
 
-def train_test_split_vehicles(df, test_size, balance_test=True):
+def train_test_split_vehicles(df, test_size, balance_train=True, balance_test=True):
     """splits the data into a train and test set, where the test set
     has `test_class_size` vehicles from each class"""
     ids_train,ids_test,types_test = \
@@ -77,19 +78,12 @@ def train_test_split_vehicles(df, test_size, balance_test=True):
     
     df_train = __select_by_ids(df, ids_train)
     df_test = __select_by_ids(df, ids_test)
-    return df_train, df_test
-
-
-def get_xy(df, window, overlap, agg_dict, min_speed_ratio, balance_roads=False):
-    """get X and y from dataframe using either aggregation or downsampling"""
     
-    df_agg = downsample(df, window, overlap, agg_dict, min_speed_ratio=min_speed_ratio)
-
-    if balance_roads == True:
+    if balance_train:
         """ the number of cars and taxis in each edge is balanced"""
-        df_agg = __balance_roads(df_agg)
-
-    return __split_X_y(df_agg)
+        df_train = __balance_roads(df_train)
+    
+    return __split_X_y(df_train), __split_X_y(df_test)
 
 
 def accuracy(model, X, y, metric=accuracy_score):
