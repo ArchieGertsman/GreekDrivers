@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
+from sklearn.base import clone
 from joblib import Parallel, delayed
 import multiprocessing
 
@@ -70,20 +71,46 @@ def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=Non
     return df_agg
 
 
-def train_test_split_vehicles(df, test_size, balance_train=True, balance_test=True):
-    """splits the data into a train and test set, where the test set
-    has `test_class_size` vehicles from each class"""
-    ids_train,ids_test,types_test = \
-        __train_test_split_ids(df, test_size, balance_test)
+def workflow(df_agg, model, splitter_obj, balance_train=True, balance_test=True):
+    ids,types = __ids_types(df_agg)
+    accs = []
+    for train_idx, test_idx in splitter_obj.split(ids, types):
+        ids_train, ids_test = ids[train_idx], ids[test_idx]
+        types_train, types_test = types[train_idx], types[test_idx]
+        
+        df_train = __select_by_ids(df_agg, ids_train)
+        if balance_train:
+            df_train = __balance_roads(df_train)
+        X_train,y_train = __split_X_y(df_train)
+
+        if balance_test:
+            df_id_type = pd.DataFrame(data=np.array([ids_test,types_test]).T, columns=['id','type'])
+            ids_test = __balance_ids(df_id_type)
+        df_test = __select_by_ids(df_agg, ids_test)
+        X_test,y_test = __split_X_y(df_test)
+
+        model = clone(model)
+        model.fit(X_train, y_train)
+        acc = accuracy(model, X_test, y_test)
+        print(acc)
+        accs += [acc]
+    accs = np.array(accs)
+    return accs.mean(), accs.std()
+
+
+# def train_test_split_vehicles(df, test_size, balance_train=True, balance_test=True):
+#     """splits the data into a train and test set, where the test set
+#     has `test_class_size` vehicles from each class"""
+#     ids_train,ids_test = __train_test_split_ids(df, test_size, balance_test)
     
-    df_train = __select_by_ids(df, ids_train)
-    df_test = __select_by_ids(df, ids_test)
+#     df_train = __select_by_ids(df, ids_train)
+#     df_test = __select_by_ids(df, ids_test)
     
-    if balance_train:
-        """ the number of cars and taxis in each edge is balanced"""
-        df_train = __balance_roads(df_train)
+#     if balance_train:
+#         """ the number of cars and taxis in each edge is balanced"""
+#         df_train = __balance_roads(df_train)
     
-    return __split_X_y(df_train), __split_X_y(df_test)
+#     return __split_X_y(df_train), __split_X_y(df_test)
 
 
 def accuracy(model, X, y, metric=accuracy_score):
@@ -98,21 +125,11 @@ def accuracy(model, X, y, metric=accuracy_score):
     y_hat_p = y_hat_p.groupby('id').agg('mean')
     y_hat = __vote(y_hat_p, model.classes_)
 
-#     y_hat_p = model.predict(X)
-#     y_hat_p = pd.DataFrame(index=X.index, data=y_hat_p, columns=['type'])
-#     y_hat_p = y_hat_p.groupby(['id','road']).agg(lambda x: x.mode()[0])
-#     y_hat_p = y_hat_p.groupby('id').agg(lambda x: x.mode()[0])
-#     y_hat = y_hat_p
-
     return metric(y, y_hat)
 
 
-def balance_road(road):
-    return __balance_road(road)
 
 
-
-    
 
 """------------------"""
 """ HELPER FUNCTIONS """
@@ -182,22 +199,25 @@ def __append_type_column(df_agg, df_original):
 
 
 def __train_test_split_ids(df_agg, test_size, balance_test):
-    id_type_map = df_agg.groupby('id').type.first()
-    ids,types = id_type_map.index.values,id_type_map.values
-    ids_train,ids_test,_,types_test = train_test_split(ids, types, test_size=test_size, stratify=types)
+    ids,types = __ids_types(df_agg)
+    ids_train,ids_test,_,_ = train_test_split(ids, types, test_size=test_size, stratify=types)
     if balance_test:
         ids_test = __balance_ids(id_type_map.loc[ids_test])
-    return ids_train,ids_test,types_test
+    return ids_train,ids_test
+
+
+def __ids_types(df_agg):
+    id_type_map = df_agg.groupby('id').type.first()
+    return id_type_map.index.values,id_type_map.values
 
 
 def __select_by_ids(df_agg, ids):
     return df_agg[df_agg.index.get_level_values('id').isin(ids)]
 
 
-def __balance_ids(id_type_map):
-    id_type_map = pd.DataFrame(id_type_map)
-    g = id_type_map.groupby('type', group_keys=False)
-    return g.apply(lambda group: group.sample(g.size().min())).index.values
+def __balance_ids(df_id_type):
+    g = df_id_type.groupby('type', group_keys=False)
+    return g.apply(lambda group: group.sample(g.size().min())).id.values
 
 
 def __balance_roads(df_agg):
