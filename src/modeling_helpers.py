@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 from joblib import Parallel, delayed
 import multiprocessing
 
 
-def downsample(df, window, overlap, agg_dict):
+def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=None):
     """downsamples each (id,road) pair in the dataframe with overlap
     between consecutive windows
     
@@ -29,6 +30,9 @@ def downsample(df, window, overlap, agg_dict):
         two columns for speed: one downsampled using `mean`
         and the other using `std`. Note: only `mean` and `std`
         are allowed.
+    parallel : bool, optional
+        indicates whether or not to parallelize downsampling among
+        (id,road) pairs
     
     Returns
     -------
@@ -38,28 +42,54 @@ def downsample(df, window, overlap, agg_dict):
         numerous rows, each corresponding to a window's aggregation.
     """
     assert(__extract_agg_funcs(agg_dict) == set({'mean','std'}))
-        
+    
+    if min_speed_ratio is not None:
+#         df['speed_bool'] = (df.speed>0).astype(int)
+        df.insert(len(df.columns), 'speed_bool', (df.speed>0).astype(int))
+        agg_dict['speed_bool'] = ['mean']
+    
     step = int((1-overlap)*window)
     df_drop_type = df.drop('type', axis=1)
     
-#     df_agg = df_drop_type.groupby(['id','road']) \
-#         .apply(__downsample_group, window, step)
+    if parallel:
+        df_agg = __groupby_apply_parallel(df_drop_type, ['id','road'], 
+                   __downsample_group, window, step)
+    else:
+        df_agg = df_drop_type.groupby(['id','road']) \
+            .apply(__downsample_group, window, step)
 
-    df_agg = __groupby_apply_parallel(
-        df_drop_type, ['id','road'], __downsample_group, window, step)
     df_agg.columns = __downsample_cols(df_drop_type.columns)
     df_agg = df_agg[__extract_feature_list(agg_dict)]
     df_agg = __append_type_column(df_agg, df)
+    
+    if min_speed_ratio is not None:
+        df_agg = df_agg[df_agg.speed_bool_mean >= 0.75]
+        df_agg.drop('speed_bool_mean', axis=1, inplace=True)
+    
     return df_agg
 
 
-def train_test_split_vehicles(df_agg, test_class_size):
+def train_test_split_vehicles(df, test_size, balance_test=True):
     """splits the data into a train and test set, where the test set
     has `test_class_size` vehicles from each class"""
-    df_agg_test = __sample_test_set(df_agg, test_class_size)
-    df_agg_train = __construct_train_set(
-        df_agg, df_agg_test.index.get_level_values('id'))
-    return __split_X_y(df_agg_train), __split_X_y(df_agg_test)
+    ids_train,ids_test,types_test = \
+        __train_test_split_ids(df, test_size, balance_test)
+    
+    df_train = __select_by_ids(df, ids_train)
+    df_test = __select_by_ids(df, ids_test)
+    return df_train, df_test
+
+
+def get_xy(df, window, overlap, agg_dict, min_speed_ratio, balance_roads=False):
+    """get X and y from dataframe using either aggregation or downsampling"""
+    
+    df_agg = downsample(df, window, overlap, agg_dict, min_speed_ratio=min_speed_ratio)
+
+    if balance_roads == True:
+        """ the number of cars and taxis in each edge is balanced"""
+        df_agg = __balance_roads(df_agg)
+
+    return __split_X_y(df_agg)
 
 
 def accuracy(model, X, y, metric=accuracy_score):
@@ -83,6 +113,10 @@ def accuracy(model, X, y, metric=accuracy_score):
     return metric(y, y_hat)
 
 
+def balance_road(road):
+    return __balance_road(road)
+
+
 
     
 
@@ -96,13 +130,13 @@ def accuracy(model, X, y, metric=accuracy_score):
 
 """ downsample """
 
-def __temp_func(func, name, grp, *args):     
-    return func(grp, *args), name
-
 
 def __groupby_apply_parallel(df, by, func, *args):
     g = df.groupby(by)
     idx_names = df.index.names
+    def __temp_func(func, name, grp, *args):     
+        return func(grp, *args), name
+    
     lst,idx = zip(*Parallel(n_jobs=multiprocessing.cpu_count())
         (delayed(__temp_func)(func, name, grp, *args) for name,grp in g))
     df2 = pd.concat(lst, keys=idx)
@@ -153,47 +187,28 @@ def __append_type_column(df_agg, df_original):
 """ train_test_split  """
 
 
-# test set
-
-def __sample_test_set(df_agg, class_size):
-    """selects `class_size` vehicles from each class at random and
-    combines them into a test set
-    """
-    df_reset = df_agg.reset_index('road')
-
-    df_list = []
-    for vehicle_class in ['Car','Taxi']:
-        idx = __sample_class_idx(df_reset, vehicle_class, class_size)
-        df_list.append(df_reset.loc[idx])
-
-    df_agg_test = pd.concat(df_list).set_index('road', append=True)
-    return df_agg_test
+def __train_test_split_ids(df_agg, test_size, balance_test):
+    id_type_map = df_agg.groupby('id').type.first()
+    ids,types = id_type_map.index.values,id_type_map.values
+    ids_train,ids_test,_,types_test = train_test_split(ids, types, test_size=test_size, stratify=types)
+    if balance_test:
+        ids_test = __balance_ids(id_type_map.loc[ids_test])
+    return ids_train,ids_test,types_test
 
 
-def __sample_class_idx(df, vehicle_class, class_size):
-    """samples `class_size` indices from class `vehicle_class`.
-    `df` must be indexed only by id.
-    """
-    idx_sample = df[df.type==vehicle_class] \
-        .index \
-        .unique() \
-        .to_series() \
-        .sample(class_size) \
-        .values
-    return idx_sample
+def __select_by_ids(df_agg, ids):
+    return df_agg[df_agg.index.get_level_values('id').isin(ids)]
 
 
-# train set
+def __balance_ids(id_type_map):
+    id_type_map = pd.DataFrame(id_type_map)
+    g = id_type_map.groupby('type', group_keys=False)
+    return g.apply(lambda group: group.sample(g.size().min())).index.values
 
-def __construct_train_set(df_agg, test_ids):
-    """balances the number of vehicles on each road by resampling the
-    smaller class. Only selects vehicles that were not chosen to be
-    in the test set
-    """
-    df_agg_train = df_agg.drop(index=test_ids, level='id')
-    df_agg_train = df_agg_train.groupby('road').apply(__balance_road)
-    df_agg_train.index = df_agg_train.index.reorder_levels((1,0))
-    return df_agg_train
+
+def __balance_roads(df_agg):
+    df_agg = df_agg.groupby('road').apply(__balance_road)
+    return df_agg.reorder_levels((1,0))
 
 
 def __balance_road(road):
