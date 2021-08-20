@@ -71,7 +71,7 @@ def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=Non
     return df_agg
 
 
-def workflow(df_agg, model, splitter_obj, balance_train=True, balance_test=True):
+def workflow(df_agg, model, splitter_obj, metric, metric_kwargs, balance_train=True, balance_test=True):
     ids,types = __ids_types(df_agg)
     accs = []
     for train_idx, test_idx in splitter_obj.split(ids, types):
@@ -84,48 +84,17 @@ def workflow(df_agg, model, splitter_obj, balance_train=True, balance_test=True)
         X_train,y_train = __split_X_y(df_train)
 
         if balance_test:
-            df_id_type = pd.DataFrame(data=np.array([ids_test,types_test]).T, columns=['id','type'])
-            ids_test = __balance_ids(df_id_type)
+            ids_test = __balance_ids(ids_test,types_test)
         df_test = __select_by_ids(df_agg, ids_test)
         X_test,y_test = __split_X_y(df_test)
 
         model = clone(model)
         model.fit(X_train, y_train)
-        acc = accuracy(model, X_test, y_test)
+        acc = __accuracy(model, X_test, y_test, metric, metric_kwargs)
         print(acc)
         accs += [acc]
     accs = np.array(accs)
     return accs.mean(), accs.std()
-
-
-# def train_test_split_vehicles(df, test_size, balance_train=True, balance_test=True):
-#     """splits the data into a train and test set, where the test set
-#     has `test_class_size` vehicles from each class"""
-#     ids_train,ids_test = __train_test_split_ids(df, test_size, balance_test)
-    
-#     df_train = __select_by_ids(df, ids_train)
-#     df_test = __select_by_ids(df, ids_test)
-    
-#     if balance_train:
-#         """ the number of cars and taxis in each edge is balanced"""
-#         df_train = __balance_roads(df_train)
-    
-#     return __split_X_y(df_train), __split_X_y(df_test)
-
-
-def accuracy(model, X, y, metric=accuracy_score):
-    """measures the accuracy of a trained model on test data by 
-    a specified metric. Uses voting.
-    """
-    y = y.groupby('id').first()
-    
-    y_hat_p = model.predict_proba(X)[:,0]
-    y_hat_p = pd.DataFrame(index=X.index, data=y_hat_p, columns=['type'])
-    y_hat_p = y_hat_p.groupby(['id','road']).agg('mean')
-    y_hat_p = y_hat_p.groupby('id').agg('mean')
-    y_hat = __vote(y_hat_p, model.classes_)
-
-    return metric(y, y_hat)
 
 
 
@@ -197,15 +166,6 @@ def __append_type_column(df_agg, df_original):
 
 """ train_test_split  """
 
-
-def __train_test_split_ids(df_agg, test_size, balance_test):
-    ids,types = __ids_types(df_agg)
-    ids_train,ids_test,_,_ = train_test_split(ids, types, test_size=test_size, stratify=types)
-    if balance_test:
-        ids_test = __balance_ids(id_type_map.loc[ids_test])
-    return ids_train,ids_test
-
-
 def __ids_types(df_agg):
     id_type_map = df_agg.groupby('id').type.first()
     return id_type_map.index.values,id_type_map.values
@@ -215,7 +175,8 @@ def __select_by_ids(df_agg, ids):
     return df_agg[df_agg.index.get_level_values('id').isin(ids)]
 
 
-def __balance_ids(df_id_type):
+def __balance_ids(ids, types):
+    df_id_type = pd.DataFrame(data=np.array([ids,types]).T, columns=['id','type'])
     g = df_id_type.groupby('type', group_keys=False)
     return g.apply(lambda group: group.sample(g.size().min())).id.values
 
@@ -258,8 +219,24 @@ def __split_X_y(df_agg):
 
 """ accuracy """
 
+def __accuracy(model, X, y, metric=accuracy_score, metric_kwargs={}):
+    """measures the accuracy of a trained model on test data by 
+    a specified metric. Uses voting.
+    """
+    y = y.groupby('id').first()
+    
+    y_hat_p = model.predict_proba(X)[:,0]
+    y_hat_p = pd.DataFrame(index=X.index, data=y_hat_p, columns=['type'])
+    y_hat_p = y_hat_p.groupby(['id','road']).agg('mean')
+    y_hat_p = y_hat_p.groupby('id').agg('mean')
+    y_hat = __vote(y_hat_p, model.classes_)
+
+    return metric(y, y_hat, **metric_kwargs)
+
+
 def __extreme(x):
     return x[np.abs((x-0.5)).argmax()]
+
 
 def __vote(y_hat_p, classes):
     return y_hat_p.type.map(lambda x: classes[0] if x>=0.5 else classes[1])
