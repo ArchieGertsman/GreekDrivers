@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.base import clone
 from joblib import Parallel, delayed
@@ -71,30 +71,64 @@ def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=Non
     return df_agg
 
 
-def workflow(df_agg, model, splitter_obj, metric, metric_kwargs, balance_train=True, balance_test=True):
-    ids,types = __ids_types(df_agg)
-    accs = []
-    for train_idx, test_idx in splitter_obj.split(ids, types):
+def workflow(df_agg, model, splitter_obj, metric, metric_kwargs={}, balance_train=None, balance_test=True):
+    """trains a model on a downsampled dataframe according to a splitting scheme
+    and returns the mean & std accuracy according to a metric
+    
+    Parameters
+    ----------
+    df_agg : pd.DataFrame
+        downsampled dataframe on which model will be trained
+    model : sklearn estimator instance
+        model that will be trained on `df_agg`
+    splitter_obj : splitter class from sklearn.model_selection
+        the train/test splitting scheme
+    metric : classification metric from sklearn.metrics
+        the metric by which to score the model
+    metric_kwargs : dict, optional
+        dict of named arguments that will be passed to `metric`
+    balance_train : {'overall', 'by_road'} or None, optional
+        `None` : 
+            don't balance the training sets
+        `'overall'` : 
+            balance the classes in the training sets by 
+            number of rows, resampling the smaller class
+        `'by_road'` : 
+            balance the classes for each road in the
+            training set, resampling the smaller class
+    balance_test : bool, optional
+        if `True` then balances the classes in the test sets
+        by number of vehicle ids, downsampling the larger class
+    
+    Returns
+    -------
+    acc_stats : 2-tupe of floats
+        pair of mean and std accuracy
+    """
+    ids,labels = __ids_labels(df_agg)
+    scores = []
+    for train_idx, test_idx in splitter_obj.split(ids, labels):
         ids_train, ids_test = ids[train_idx], ids[test_idx]
-        types_train, types_test = types[train_idx], types[test_idx]
+        labels_train, labels_test = labels[train_idx], labels[test_idx]
         
         df_train = __select_by_ids(df_agg, ids_train)
-        if balance_train:
-            df_train = __balance_roads(df_train)
+        if balance_train is not None:
+            df_train = __balance_train(df_train, method=balance_train)
         X_train,y_train = __split_X_y(df_train)
 
         if balance_test:
-            ids_test = __balance_ids(ids_test,types_test)
+            ids_test = __balance_ids(ids_test,labels_test)
         df_test = __select_by_ids(df_agg, ids_test)
         X_test,y_test = __split_X_y(df_test)
 
         model = clone(model)
         model.fit(X_train, y_train)
-        acc = __accuracy(model, X_test, y_test, metric, metric_kwargs)
-        print(acc)
-        accs += [acc]
-    accs = np.array(accs)
-    return accs.mean(), accs.std()
+        score = __score(model, X_test, y_test, metric, metric_kwargs)
+        print(score)
+        scores += [score]
+    scores = np.array(scores)
+    score_stats = scores.mean(axis=0), scores.std(axis=0)
+    return score_stats
 
 
 
@@ -112,6 +146,7 @@ def workflow(df_agg, model, splitter_obj, metric, metric_kwargs, balance_train=T
 
 
 def __groupby_apply_parallel(df, by, func, *args):
+    """parallelizes `df.groupby(by).apply(func, args)` across groups"""
     g = df.groupby(by)
     idx_names = df.index.names
     def __temp_func(func, name, grp, *args):     
@@ -120,7 +155,7 @@ def __groupby_apply_parallel(df, by, func, *args):
     lst,idx = zip(*Parallel(n_jobs=multiprocessing.cpu_count())
         (delayed(__temp_func)(func, name, grp, *args) for name,grp in g))
     df2 = pd.concat(lst, keys=idx)
-    df2.index.names = idx_names + ['level_2']
+    df2.index.names = idx_names + ['level_extra']
     return df2
 
 
@@ -166,19 +201,32 @@ def __append_type_column(df_agg, df_original):
 
 """ train_test_split  """
 
-def __ids_types(df_agg):
-    id_type_map = df_agg.groupby('id').type.first()
-    return id_type_map.index.values,id_type_map.values
+def __ids_labels(df_agg):
+    """fetches array of ids and corresponding array of vehicle types"""
+    id_label_map = df_agg.groupby('id').type.first()
+    ids, labels = id_label_map.index.values, id_label_map.values
+    return ids, labels
 
 
 def __select_by_ids(df_agg, ids):
+    """selects all rows from `df_agg` that are indexed by an id in `ids`"""
     return df_agg[df_agg.index.get_level_values('id').isin(ids)]
 
 
-def __balance_ids(ids, types):
-    df_id_type = pd.DataFrame(data=np.array([ids,types]).T, columns=['id','type'])
-    g = df_id_type.groupby('type', group_keys=False)
+def __balance_ids(ids, labels):
+    """balances number of ids from each class by downsampling larger class"""
+    df_id_label = pd.DataFrame(data=np.array([ids,labels]).T, columns=['id','label'])
+    g = df_id_label.groupby('label', group_keys=False)
     return g.apply(lambda group: group.sample(g.size().min())).id.values
+
+
+def __balance_train(df_train, method):
+    if method == 'by_road':
+        return __balance_roads(df_train)
+    elif method == 'overall':
+        return __balance_overall(df_train)
+    else:
+        raise Exception('invalid balancing method')
 
 
 def __balance_roads(df_agg):
@@ -196,6 +244,16 @@ def __balance_road(road):
     idx_resample = __resample_idx(road, class_counts.idxmin(), n_resample)
     resample = road.loc[idx_resample]
     return pd.concat([road,resample])
+
+
+def __balance_overall(df):
+    df_agg = df.reset_index()
+    class_counts = df_agg.type.value_counts()
+    n_resample = class_counts.max() - class_counts.min()
+    idx_resample = __resample_idx(df_agg, class_counts.idxmin(), n_resample)
+    resample = df_agg.loc[idx_resample]
+    df_balanced = pd.concat([df_agg,resample])
+    return df_balanced.set_index(['id','road'])
     
     
 def __resample_idx(road, vehicle_class, n_resample):
@@ -219,24 +277,30 @@ def __split_X_y(df_agg):
 
 """ accuracy """
 
-def __accuracy(model, X, y, metric=accuracy_score, metric_kwargs={}):
+def __score(model, X, y, metric=accuracy_score, metric_kwargs={}):
     """measures the accuracy of a trained model on test data by 
     a specified metric. Uses voting.
     """
     y = y.groupby('id').first()
     
-    y_hat_p = model.predict_proba(X)[:,0]
-    y_hat_p = pd.DataFrame(index=X.index, data=y_hat_p, columns=['type'])
-    y_hat_p = y_hat_p.groupby(['id','road']).agg('mean')
-    y_hat_p = y_hat_p.groupby('id').agg('mean')
-    y_hat = __vote(y_hat_p, model.classes_)
+    y_score = model.predict_proba(X)[:,1]
+    y_score = pd.DataFrame(index=X.index, data=y_score, columns=['type'])
+    y_score = y_score.groupby(['id','road']).agg('mean')
+    y_score = y_score.groupby('id').agg('mean')
+    y_hat = y_score \
+        if metric==roc_auc_score \
+        else __predict(y_score, model.classes_)
 
     return metric(y, y_hat, **metric_kwargs)
 
 
 def __extreme(x):
+    """returns element from array of probabilities `x` that is 
+    farthest from 0.5
+    """
     return x[np.abs((x-0.5)).argmax()]
 
 
-def __vote(y_hat_p, classes):
-    return y_hat_p.type.map(lambda x: classes[0] if x>=0.5 else classes[1])
+def __predict(y_score, classes, threshold=0.5):
+    """predicts classes from scores based on threshold"""
+    return y_score.type.map(lambda x: classes[0] if x<threshold else classes[1])
