@@ -222,7 +222,6 @@ def remove_traj_near_nodes(df,node_rad = 10):
 def split_edge_to_seg(df,seg_len,seg_lim):
     df['seg'] = df.node_veh_dist//seg_len
     df = df[~((df.len//seg_len == df['seg']) & (df.len%seg_len <= seg_lim))]
-    df.drop(['vehicle_density'],axis = 1,inplace = True)
     df.rename(columns = {'seg' : 'edge_seg'},inplace=True)
     return df
 
@@ -239,7 +238,7 @@ def vehicle_density_by_seg(df):
 def avg_surr_speed_by_seg(df):
 
     df2 = df.reset_index().groupby(['edge_id','edge_seg','time'])['speed'].mean()
-    df.drop(['avg_surr_speed'],axis = 1,inplace = True)
+    
     df= df.reset_index().merge(df2,how = 'left', left_on=['edge_id','edge_seg','time'], 
              right_on =['edge_id','edge_seg','time'],suffixes = ['','_y'] )#[['id','time']+ col_list + ['speed_y']]
     df.set_index(['id','time'], inplace=True)
