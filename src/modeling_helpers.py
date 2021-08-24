@@ -7,7 +7,10 @@ from joblib import Parallel, delayed
 import multiprocessing
 
 
-def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=None):
+def downsample(
+    df, window, overlap, agg_dict, 
+    parallel=True, min_speed_ratio=None
+):
     """downsamples each (id,road) pair in the dataframe with overlap
     between consecutive windows
     
@@ -34,6 +37,11 @@ def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=Non
     parallel : bool, optional
         indicates whether or not to parallelize downsampling among
         (id,road) pairs
+    min_speed_ratio : float in [0,1] or None, optional
+        if not None then filter out windows where less than
+        `min_speed_ratio * window` timestamps display a speed
+        greater than zero. I.e. filters out windows that 
+        aren't "moving enough"
     
     Returns
     -------
@@ -71,7 +79,10 @@ def downsample(df, window, overlap, agg_dict, parallel=True, min_speed_ratio=Non
     return df_agg
 
 
-def workflow(df_agg, model, splitter_obj, metric, metric_kwargs={}, balance_train=None, balance_test=True):
+def workflow(
+    df_agg, model, splitter_obj, metric, 
+    metric_kwargs={}, balance_train=None, balance_test=True, parallel=True
+):
     """trains a model on a downsampled dataframe according to a splitting scheme
     and returns the mean & std accuracy according to a metric
     
@@ -99,6 +110,9 @@ def workflow(df_agg, model, splitter_obj, metric, metric_kwargs={}, balance_trai
     balance_test : bool, optional
         if `True` then balances the classes in the test sets
         by number of vehicle ids, downsampling the larger class
+    parallel : bool, optional
+        indicates whether or not to parallelize the iterations of
+        split-train-test-score
     
     Returns
     -------
@@ -106,26 +120,24 @@ def workflow(df_agg, model, splitter_obj, metric, metric_kwargs={}, balance_trai
         pair of mean and std accuracy
     """
     ids,labels = __ids_labels(df_agg)
-    scores = []
-    for train_idx, test_idx in splitter_obj.split(ids, labels):
-        ids_train, ids_test = ids[train_idx], ids[test_idx]
-        labels_train, labels_test = labels[train_idx], labels[test_idx]
-        
-        df_train = __select_by_ids(df_agg, ids_train)
-        if balance_train is not None:
-            df_train = __balance_train(df_train, method=balance_train)
-        X_train,y_train = __split_X_y(df_train)
-
-        if balance_test:
-            ids_test = __balance_ids(ids_test,labels_test)
-        df_test = __select_by_ids(df_agg, ids_test)
-        X_test,y_test = __split_X_y(df_test)
-
-        model = clone(model)
-        model.fit(X_train, y_train)
-        score = __score(model, X_test, y_test, metric, metric_kwargs)
-        print(score)
-        scores += [score]
+    
+    if parallel:
+        scores = Parallel(n_jobs=multiprocessing.cpu_count())(
+            delayed(__split_train_test_score)(
+                ids, labels, train_idx, test_idx, df_agg, balance_train, 
+                balance_test, model, metric, metric_kwargs
+            )
+            for train_idx, test_idx in splitter_obj.split(ids, labels)
+        )
+    else:
+        scores = [
+            __split_train_test_score(
+                ids, labels, train_idx, test_idx, df_agg, balance_train, 
+                balance_test, model, metric, metric_kwargs
+            )
+            for train_idx, test_idx in splitter_obj.split(ids, labels)
+        ]
+            
     scores = np.array(scores)
     score_stats = scores.mean(axis=0), scores.std(axis=0)
     return score_stats
@@ -199,7 +211,31 @@ def __append_type_column(df_agg, df_original):
 
 
 
-""" train_test_split  """
+""" workflow  """
+
+def __split_train_test_score(
+    ids, labels, train_idx, test_idx, df_agg, balance_train, 
+    balance_test, model, metric, metric_kwargs
+):
+    ids_train, ids_test = ids[train_idx], ids[test_idx]
+    labels_train, labels_test = labels[train_idx], labels[test_idx]
+
+    df_train = __select_by_ids(df_agg, ids_train)
+    if balance_train is not None:
+        df_train = __balance_train(df_train, method=balance_train)
+    X_train,y_train = __split_X_y(df_train)
+
+    if balance_test:
+        ids_test = __balance_ids(ids_test,labels_test)
+    df_test = __select_by_ids(df_agg, ids_test)
+    X_test,y_test = __split_X_y(df_test)
+
+    model = clone(model)
+    model.fit(X_train, y_train)
+    score = __score(model, X_test, y_test, metric, metric_kwargs)
+    print(score)
+    return score
+
 
 def __ids_labels(df_agg):
     """fetches array of ids and corresponding array of vehicle types"""
@@ -271,11 +307,6 @@ def __split_X_y(df_agg):
     """splits labelled data into unlabelled data and labels"""
     return df_agg.drop('type', axis=1), df_agg.type
 
-
-
-
-
-""" accuracy """
 
 def __score(model, X, y, metric=accuracy_score, metric_kwargs={}):
     """measures the accuracy of a trained model on test data by 
