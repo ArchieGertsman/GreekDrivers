@@ -123,17 +123,17 @@ def workflow(
     
     if parallel:
         scores = Parallel(n_jobs=multiprocessing.cpu_count())(
-            delayed(__split_train_test_score)(
-                ids, labels, train_idx, test_idx, df_agg, balance_train, 
-                balance_test, model, metric, metric_kwargs
+            delayed(__balance_train_test_score)(
+                ids[train_idx], ids[test_idx], labels[train_idx], labels[test_idx], 
+                df_agg, balance_train, balance_test, model, metric, metric_kwargs
             )
             for train_idx, test_idx in splitter_obj.split(ids, labels)
         )
     else:
         scores = [
-            __split_train_test_score(
-                ids, labels, train_idx, test_idx, df_agg, balance_train, 
-                balance_test, model, metric, metric_kwargs
+            __balance_train_test_score(
+                ids[train_idx], ids[test_idx], labels[train_idx], labels[test_idx], 
+                df_agg, balance_train, balance_test, model, metric, metric_kwargs
             )
             for train_idx, test_idx in splitter_obj.split(ids, labels)
         ]
@@ -141,6 +141,33 @@ def workflow(
     scores = np.array(scores)
     score_stats = scores.mean(axis=0), scores.std(axis=0)
     return score_stats
+
+
+def train_test_split_vehicles(df_agg, test_size, balance_train=None, balance_test=False):
+    ids,labels = __ids_labels(df_agg)
+    
+    ids_train, ids_test, labels_train, labels_test = \
+        train_test_split(ids, labels, test_size=test_size)
+    
+    return __balance(ids_train, ids_test, labels_train, labels_test, 
+                  df_agg, balance_train, balance_test)
+
+
+def score(model, X, y, metric=accuracy_score, metric_kwargs={}):
+    """measures the accuracy of a trained model on test data by 
+    a specified metric. Uses voting.
+    """
+    y = y.groupby('id').first()
+    
+    y_score = model.predict_proba(X)[:,1]
+    y_score = pd.DataFrame(index=X.index, data=y_score, columns=['type'])
+    y_score = y_score.groupby(['id','road']).agg('mean')
+    y_score = y_score.groupby('id').agg('mean')
+    y_hat = y_score \
+        if metric==roc_auc_score \
+        else __predict(y_score, model.classes_)
+
+    return metric(y, y_hat, **metric_kwargs)
 
 
 
@@ -213,13 +240,25 @@ def __append_type_column(df_agg, df_original):
 
 """ workflow  """
 
-def __split_train_test_score(
-    ids, labels, train_idx, test_idx, df_agg, balance_train, 
-    balance_test, model, metric, metric_kwargs
+def __balance_train_test_score(
+    ids_train, ids_test, labels_train, labels_test, df_agg, 
+    balance_train, balance_test, model, metric, metric_kwargs
 ):
-    ids_train, ids_test = ids[train_idx], ids[test_idx]
-    labels_train, labels_test = labels[train_idx], labels[test_idx]
+    X_train, X_test, y_train, y_test = \
+        __balance(ids_train, ids_test, labels_train, labels_test, 
+                  df_agg, balance_train, balance_test)
 
+    model = clone(model)
+    model.fit(X_train, y_train)
+    score = score(model, X_test, y_test, metric, metric_kwargs)
+    print(score)
+    return score
+
+
+def __balance(
+    ids_train, ids_test, labels_train, labels_test, 
+    df_agg, balance_train, balance_test
+):
     df_train = __select_by_ids(df_agg, ids_train)
     if balance_train is not None:
         df_train = __balance_train(df_train, method=balance_train)
@@ -229,12 +268,8 @@ def __split_train_test_score(
         ids_test = __balance_ids(ids_test,labels_test)
     df_test = __select_by_ids(df_agg, ids_test)
     X_test,y_test = __split_X_y(df_test)
-
-    model = clone(model)
-    model.fit(X_train, y_train)
-    score = __score(model, X_test, y_test, metric, metric_kwargs)
-    print(score)
-    return score
+    
+    return X_train, X_test, y_train, y_test
 
 
 def __ids_labels(df_agg):
@@ -306,23 +341,6 @@ def __resample_idx(road, vehicle_class, n_resample):
 def __split_X_y(df_agg):
     """splits labelled data into unlabelled data and labels"""
     return df_agg.drop('type', axis=1), df_agg.type
-
-
-def __score(model, X, y, metric=accuracy_score, metric_kwargs={}):
-    """measures the accuracy of a trained model on test data by 
-    a specified metric. Uses voting.
-    """
-    y = y.groupby('id').first()
-    
-    y_score = model.predict_proba(X)[:,1]
-    y_score = pd.DataFrame(index=X.index, data=y_score, columns=['type'])
-    y_score = y_score.groupby(['id','road']).agg('mean')
-    y_score = y_score.groupby('id').agg('mean')
-    y_hat = y_score \
-        if metric==roc_auc_score \
-        else __predict(y_score, model.classes_)
-
-    return metric(y, y_hat, **metric_kwargs)
 
 
 def __extreme(x):
