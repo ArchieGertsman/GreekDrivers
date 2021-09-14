@@ -309,12 +309,13 @@ def __balance_road(road):
     """balances the number of cars and taxis in a road by resampling
     smaller class
     """
-    class_counts = road.groupby('id').first().type.value_counts()
+    class_counts = road.type.value_counts()
     n_resample = class_counts.max() - class_counts.min()
     road.reset_index('road', inplace=True, drop=True)
+    road.reset_index('id', inplace=True)
     idx_resample = __resample_idx(road, class_counts.idxmin(), n_resample)
     resample = road.loc[idx_resample]
-    return pd.concat([road,resample])
+    return pd.concat([road,resample]).set_index('id')
 
 
 def __balance_overall(df):
