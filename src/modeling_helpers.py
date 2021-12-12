@@ -9,7 +9,7 @@ import multiprocessing
 
 def downsample(
     df, window, overlap, agg_dict, 
-    parallel=True, min_speed_ratio=None
+    n_jobs=1, min_speed_ratio=None
 ):
     """downsamples each (id,road) pair in the dataframe with overlap
     between consecutive windows
@@ -61,9 +61,9 @@ def downsample(
     step = int((1-overlap)*window)
     df_drop_type = df_cpy.drop('type', axis=1)
     
-    if parallel:
-        df_agg = __groupby_apply_parallel(df_drop_type, ['id','road'], 
-                   __downsample_group, window, step)
+    if n_jobs > 1:
+        df_agg = __groupby_apply_parallel(n_jobs, df_drop_type, 
+                    ['id','road'], __downsample_group, window, step)
     else:
         df_agg = df_drop_type.groupby(['id','road']) \
             .apply(__downsample_group, window, step)
@@ -81,7 +81,7 @@ def downsample(
 
 def workflow(
     df_agg, model, splitter_obj, metric, 
-    metric_kwargs={}, balance_train=None, balance_test=True, parallel=True
+    metric_kwargs={}, balance_train=None, balance_test=True, n_jobs=1
 ):
     """trains a model on a downsampled dataframe according to a splitting scheme
     and returns the mean & std accuracy according to a metric
@@ -121,8 +121,8 @@ def workflow(
     """
     ids,labels = __ids_labels(df_agg)
     
-    if parallel:
-        scores = Parallel(n_jobs=multiprocessing.cpu_count())(
+    if n_jobs > 1:
+        scores = Parallel(n_jobs=n_jobs)(
             delayed(__balance_train_test_score)(
                 ids[train_idx], ids[test_idx], labels[train_idx], labels[test_idx], 
                 df_agg, balance_train, balance_test, model, metric, metric_kwargs
@@ -184,14 +184,14 @@ def score(model, X, y, metric=accuracy_score, metric_kwargs={}):
 """ downsample """
 
 
-def __groupby_apply_parallel(df, by, func, *args):
+def __groupby_apply_parallel(n_jobs, df, by, func, *args):
     """parallelizes `df.groupby(by).apply(func, args)` across groups"""
     g = df.groupby(by)
     idx_names = df.index.names
     def __temp_func(func, name, grp, *args):     
         return func(grp, *args), name
     
-    lst,idx = zip(*Parallel(n_jobs=multiprocessing.cpu_count())
+    lst,idx = zip(*Parallel(n_jobs=n_jobs)
         (delayed(__temp_func)(func, name, grp, *args) for name,grp in g))
     df2 = pd.concat(lst, keys=idx)
     df2.index.names = idx_names + ['level_extra']
@@ -250,9 +250,9 @@ def __balance_train_test_score(
 
     model = clone(model)
     model.fit(X_train, y_train)
-    score = score(model, X_test, y_test, metric, metric_kwargs)
-    print(score)
-    return score
+    s = score(model, X_test, y_test, metric, metric_kwargs)
+    print(s)
+    return s
 
 
 def __balance(
