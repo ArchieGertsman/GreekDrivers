@@ -86,9 +86,6 @@ def vehicle_density(df):
         vehicle_density(df)
      """
     _,df["time_stamp"] = list(zip(*df.index))
-    df['edge_progress_intervals'] = df                          \
-        .groupby(['nearest_edge_start_node'])['edge_progress']  \
-        .transform(lambda x: x-x%0.1)
 
     df2 = df                                            \
         .reset_index()                                  \
@@ -96,7 +93,7 @@ def vehicle_density(df):
             'nearest_edge_start_node',                  \
             'nearest_edge_end_node',                    \
             'dir',                                      \
-            'edge_progress_intervals','time_stamp'])    \
+            '20m_seg','time_stamp'])    \
         .agg({'id':['nunique']})
     return df2
 
@@ -137,8 +134,31 @@ def split_trajectories(df, size):
         df = csv_to_df('sample.csv')
         df = split_trajectories(df, 3000)
     """
-    return df.groupby('id', as_index=False, group_keys=False) \
+    return df.groupby(['id','file_name'], as_index=False, group_keys=False) \
             .apply(__split_vehicle, size)
+
+def split_trajectories_overlap(df, size, overlap):
+    """splits each vehicle's trajectory into smaller trajectories of fixed size,
+    adding another dimension to the multiindex. Data is truncated to be a multiple
+    of `size` in length. 
+    Example usage:
+        df = csv_to_df('sample.csv')
+        df = split_trajectories(df, 3000)
+    """
+    df1 = df.groupby(['id','file_name'], as_index=False, group_keys=False) \
+            .apply(__split_vehicle, size)
+    
+    for i in range(1/overlap):
+        df2 = df.groupby(['id','file_name'], as_index=False, group_keys=False) \
+            .apply(__remove_initial_size, i*overlap*size)
+        df2 = df2.groupby(['id','file_name'], as_index=False, group_keys=False) \
+            .apply(__split_vehicle, size)
+        df1 = pd.concat([df1,df2],axis = 1)
+    
+    return df1
+
+def __remove_initial_rows(df,ele):
+    return df[ele:]
 
 
 def cross_track(df,graph):
@@ -161,7 +181,70 @@ def edge_encoding(df):
     df_edge_dummies = pd.get_dummies(df_edge_list)
     return df.join(df_edge_dummies)
 
+def length(start_node,end_node,graph):
 
+        try:
+            val = graph[start_node][end_node][0]["length"]
+        except KeyError:
+
+            try:
+                val = graph[end_node][start_node][0]["length"]
+            except KeyError:
+                val = np.nan
+
+        return val
+    
+def how_many_lanes(start_node,end_node,graph):
+    
+    try:
+        highway = graph[start_node][end_node][0]['highway'] 
+    except KeyError:
+        highway = graph[end_node][start_node][0]['highway']
+
+    if highway in ['secondary','tertiary','primary','residential','unclassified','service','track','path']:
+        val = 1
+    elif highway in ['motorway','trunk']:
+        val = 2
+    else:
+        val = 0
+    return val
+
+def remove_traj_outside_lane(df,xtrack_lim):
+    df_out_of_lane = df[(abs(df.xtrack_dist) > df.lanes*0.75)].reset_index()[['id','type']]
+    df = df[(abs(df.xtrack_dist) <= df.lanes*0.75)]
+    return df,df_out_of_lane
+
+def remove_traj_near_nodes(df,node_rad = 10):
+    df['node_veh_dist'] = df['edge_progress'] * df['len']
+    df = df[(df.node_veh_dist >= 10) & (df.node_veh_dist <= df.len - 10)]
+    return df
+
+def split_edge_to_seg(df,seg_len,seg_lim):
+    df['seg'] = df.node_veh_dist//seg_len
+    df = df[~((df.len//seg_len == df['seg']) & (df.len%seg_len <= seg_lim))]
+    df.rename(columns = {'seg' : 'edge_seg'},inplace=True)
+    return df
+
+def vehicle_density_by_seg(df):
+
+    vehicle_density_df = df.reset_index().groupby(['edge_id','edge_seg','time']).agg({'id':['nunique']})
+    col_list = list(df.columns)
+    df= df.reset_index().merge(vehicle_density_df,how = 'left', left_on=['time','edge_id','edge_seg'], 
+             right_on =['time','edge_id','edge_seg'] )[['id','time']+ col_list + [('id', 'nunique')]]
+    df.set_index(['id','time'], inplace=True)
+    df.rename(columns = {('id', 'nunique') : 'vehicle_density'},inplace=True)
+    return df
+
+def avg_surr_speed_by_seg(df):
+
+    df2 = df.reset_index().groupby(['edge_id','edge_seg','time'])['speed'].mean()
+    
+    df= df.reset_index().merge(df2,how = 'left', left_on=['edge_id','edge_seg','time'], 
+             right_on =['edge_id','edge_seg','time'],suffixes = ['','_y'] )#[['id','time']+ col_list + ['speed_y']]
+    df.set_index(['id','time'], inplace=True)
+    df.rename(columns = {('speed_y') : 'avg_surr_speed'},inplace=True)
+    
+    return df
 
 # helper functions
 
@@ -255,7 +338,7 @@ def __split_vehicle(df, size):
     df2['traj'].ffill(inplace=True)
     df2.set_index('traj', append=True, inplace=True)
     df2 = __truncate_trajectory(df2, size)
-    df2 = df2.reorder_levels([0,2,1])
+    df2 = df2.reorder_levels([0,1,3,2])
     return df2
 
 
