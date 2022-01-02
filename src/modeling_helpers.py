@@ -43,14 +43,14 @@ def downsample(
         two columns for speed: one downsampled using `mean`
         and the other using `std`. Note: only `mean` and `std`
         are allowed.
-    parallel : bool, optional
-        indicates whether or not to parallelize downsampling among
-        (id,road) pairs
+    n_jobs : int, optional
+        indicates the degree of parallelism among downsampling 
+        (id,road) pairs. A value of 1 indicates no parallelism.
     min_speed_ratio : float in [0,1] or None, optional
         if not None then filter out windows where less than
         `min_speed_ratio * window` timestamps display a speed
-        greater than zero. I.e. filters out windows that 
-        aren't "moving enough"
+        greater than zero. I.e. filters out windows where the
+        vehicle is not moving "enough"
     
     Returns
     -------
@@ -119,9 +119,10 @@ def workflow(
     balance_test : bool, optional
         if `True` then balances the classes in the test sets
         by number of vehicle ids, downsampling the larger class
-    parallel : bool, optional
-        indicates whether or not to parallelize the iterations of
-        split-train-test-score
+    n_jobs : int, optional
+        indicates the degree of parallelism among the iterations 
+        of split-train-test-score. A value of 1 indicates no
+        parallelism.
     
     Returns
     -------
