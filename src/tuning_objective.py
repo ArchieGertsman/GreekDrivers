@@ -1,3 +1,13 @@
+"""Provides Objective, a class used in hyperparameter tuning
+
+File name: tuning_objective.py
+Author(s): Archie Gertsman
+Email(s): arkadiy2@illinois.edu
+Project director: Richard Sowers (r-sowers@illinois.edu, https://publish.illinois.edu/r-sowers/)
+Copyright: Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. 
+License: MIT
+"""
+
 from modeling_helpers import *
 
 import pandas as pd

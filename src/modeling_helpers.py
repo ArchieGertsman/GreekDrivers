@@ -1,10 +1,19 @@
+"""Provides functions that prepare the data for modelling, and that perform modelling
+
+File name: modeling_helpers.py
+Author(s): Archie Gertsman
+Email(s): arkadiy2@illinois.edu
+Project director: Richard Sowers (r-sowers@illinois.edu, https://publish.illinois.edu/r-sowers/)
+Copyright: Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. 
+License: MIT
+"""
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.base import clone
 from joblib import Parallel, delayed
-import multiprocessing
 
 
 def downsample(

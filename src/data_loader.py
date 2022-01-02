@@ -1,8 +1,11 @@
-"""data.py
-by: Archie Gertsman (arkadiy2@illinois.edu)
-Project director: Richard Sowers
-r-sowers@illinois.eduhttps://publish.illinois.edu/r-sowers/
-Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. Licensed under the MIT license
+"""Provides a function for loading data from a .csv into a dataframe
+
+File name: data_loader.py
+Author(s): Archie Gertsman
+Email(s): arkadiy2@illinois.edu
+Project director: Richard Sowers (r-sowers@illinois.edu, https://publish.illinois.edu/r-sowers/)
+Copyright: Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. 
+License: MIT
 """
 
 import numpy as np

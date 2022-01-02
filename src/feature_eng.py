@@ -1,13 +1,16 @@
-"""feature_eng.py
-by: Archie Gertsman (arkadiy2@illinois.edu)
-Project director: Richard Sowers
-r-sowers@illinois.eduhttps://publish.illinois.edu/r-sowers/
-Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. Licensed under the MIT license
+"""Provides functions that engineer new features for the dataframe
+
+File name: feature_eng.py
+Author(s): Archie Gertsman, Lloyd Fernandes
+Email(s): arkadiy2@illinois.edu, lloydf2@illinois.edu
+Project director: Richard Sowers (r-sowers@illinois.edu, https://publish.illinois.edu/r-sowers/)
+Copyright: Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. 
+License: MIT
 """
 
 import numpy as np
+from numpy import arctan2, sin, cos
 import pandas as pd
-from numpy import arctan2, sin, cos, sqrt, radians
 import osmnx as ox
 from joblib import Parallel, delayed
 from pyproj import Geod
@@ -49,7 +52,6 @@ def nearest_graph_data(df, graph, mode='balltree'):
         df = df.drop('geometry', axis=1)
     else:
         raise ValueError('`mode` must be one of None, \'balltree\', or \'kdtree\'')
-        return None
 
     df[['nearest_edge_start_node', 'nearest_edge_end_node']] = np.sort(ret[:,:2])
     df['edge_progress'] = df.apply(__edge_progress, axis=1, args=(graph,))
@@ -137,6 +139,7 @@ def split_trajectories(df, size):
     return df.groupby(['id','file_name'], as_index=False, group_keys=False) \
             .apply(__split_vehicle, size)
 
+
 def split_trajectories_overlap(df, size, overlap):
     """splits each vehicle's trajectory into smaller trajectories of fixed size,
     adding another dimension to the multiindex. Data is truncated to be a multiple
@@ -156,9 +159,6 @@ def split_trajectories_overlap(df, size, overlap):
         df1 = pd.concat([df1,df2],axis = 1)
     
     return df1
-
-def __remove_initial_rows(df,ele):
-    return df[ele:]
 
 
 def cross_track(df,graph):
@@ -181,21 +181,20 @@ def edge_encoding(df):
     df_edge_dummies = pd.get_dummies(df_edge_list)
     return df.join(df_edge_dummies)
 
-def length(start_node,end_node,graph):
 
+def length(start_node, end_node, graph):
+    try:
+        val = graph[start_node][end_node][0]["length"]
+    except KeyError:
         try:
-            val = graph[start_node][end_node][0]["length"]
+            val = graph[end_node][start_node][0]["length"]
         except KeyError:
+            val = np.nan
 
-            try:
-                val = graph[end_node][start_node][0]["length"]
-            except KeyError:
-                val = np.nan
-
-        return val
+    return val
     
+
 def how_many_lanes(start_node,end_node,graph):
-    
     try:
         highway = graph[start_node][end_node][0]['highway'] 
     except KeyError:
@@ -209,15 +208,18 @@ def how_many_lanes(start_node,end_node,graph):
         val = 0
     return val
 
-def remove_traj_outside_lane(df,xtrack_lim):
+
+def remove_traj_outside_lane(df):
     df_out_of_lane = df[(abs(df.xtrack_dist) > df.lanes*0.75)].reset_index()[['id','type']]
     df = df[(abs(df.xtrack_dist) <= df.lanes*0.75)]
     return df,df_out_of_lane
 
-def remove_traj_near_nodes(df,node_rad = 10):
+
+def remove_traj_near_nodes(df):
     df['node_veh_dist'] = df['edge_progress'] * df['len']
     df = df[(df.node_veh_dist >= 10) & (df.node_veh_dist <= df.len - 10)]
     return df
+
 
 def split_edge_to_seg(df,seg_len,seg_lim):
     df['seg'] = df.node_veh_dist//seg_len
@@ -225,8 +227,8 @@ def split_edge_to_seg(df,seg_len,seg_lim):
     df.rename(columns = {'seg' : 'edge_seg'},inplace=True)
     return df
 
-def vehicle_density_by_seg(df):
 
+def vehicle_density_by_seg(df):
     vehicle_density_df = df.reset_index().groupby(['edge_id','edge_seg','time']).agg({'id':['nunique']})
     col_list = list(df.columns)
     df= df.reset_index().merge(vehicle_density_df,how = 'left', left_on=['time','edge_id','edge_seg'], 
@@ -235,8 +237,8 @@ def vehicle_density_by_seg(df):
     df.rename(columns = {('id', 'nunique') : 'vehicle_density'},inplace=True)
     return df
 
-def avg_surr_speed_by_seg(df):
 
+def avg_surr_speed_by_seg(df):
     df2 = df.reset_index().groupby(['edge_id','edge_seg','time'])['speed'].mean()
     
     df= df.reset_index().merge(df2,how = 'left', left_on=['edge_id','edge_seg','time'], 
@@ -246,7 +248,11 @@ def avg_surr_speed_by_seg(df):
     
     return df
 
-# helper functions
+
+
+"""------------------"""
+""" HELPER FUNCTIONS """
+"""------------------"""
 
 def __apply_parallel(df, func, n=4):
     """parallelizes df.apply"""

@@ -1,6 +1,17 @@
+#!/usr/bin/env python
+"""Provies an example on how to tune hyperparameters using 
+Optuna + the Objective class from ../src/tuning_objective.py
+
+File name: optuna_tuning.py
+Author(s): Archie Gertsman
+Email(s): arkadiy2@illinois.edu
+Project director: Richard Sowers (r-sowers@illinois.edu, https://publish.illinois.edu/r-sowers/)
+Copyright: Copyright 2019 University of Illinois Board of Trustees. All Rights Reserved. 
+License: MIT
+"""
+
 import sys
-sys.path.append('../src/')
-sys.path.append('../data/')
+sys.path += ['../src/', '../data/']
 from modeling_helpers import *
 from tuning_objective import Objective
 
@@ -56,4 +67,4 @@ if __name__ == "__main__":
         splitter_obj            = RepeatedStratifiedKFold(5,3)
     )
 
-    study.optimize(objective, n_trials=250)
+    study.optimize(objective, n_trials=50)
