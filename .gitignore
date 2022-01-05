@@ -7,11 +7,5 @@
 *.db
 
 tmp/
-visualization/
-analysis/
 ml/OldFiles/
-data/
 src/old
-
-data_preprocessing.ipynb
-sample.ipynb
