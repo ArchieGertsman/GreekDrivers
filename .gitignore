@@ -5,7 +5,12 @@
 *.vscode
 *cache
 *.db
+*.exe
+*.pptx
+*.html
 
 tmp/
 ml/OldFiles/
 src/old
+data/
+docs/
