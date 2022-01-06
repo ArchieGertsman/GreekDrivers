@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """Provies an example on how to tune hyperparameters using 
-Optuna + the Objective class from ../src/tuning_objective.py
+Optuna + the Objective class from ../src/tuning_objective.py.
+Instances of this file can be run on concurrent terminal
+sessions to parallelize the tuning trials.
 
 File name: optuna_tuning.py
 Author(s): Archie Gertsman
@@ -28,7 +30,7 @@ def __step(suggest_func, low, high, step=1):
 
         
 if __name__ == "__main__":
-    study_name = "best_classifier3"
+    study_name = "best_classifier"
     storage_name = f"sqlite:///{study_name}.db"
     study = optuna.create_study(
         direction="maximize",
