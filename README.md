@@ -23,7 +23,6 @@ The recently-release pNeuma Dataset (at https://open-traffic.epfl.ch/) contains 
 │   ├── data_loader.py
 │   ├── feature_eng.py
 │   ├── modeling_helpers.py
-│   ├── old
 │   └── tuning_objective.py
 
 ├── ml # data prep, training, testing, tuning, etc.
