@@ -52,7 +52,7 @@ The recently-release pNeuma Dataset (at https://open-traffic.epfl.ch/) contains 
 │       │   ├── firstlines.tex
 │       │   ├── observationframe.tex
 │       │   └── ways.tex
-└──
+
 ```
 
 ## Results
